@@ -1,0 +1,8 @@
+{
+  "name": "Remix JIN MOTOR — ระบบคำนวณราคาและใบเสนอราคา DEEPAL \u0026 CHANGAN",
+  "description": "ระบบคำนวณค่างวด ไฟแนนซ์ สิทธิประโยชน์ และออกใบเสนอราคารถยนต์ไฟฟ้า DEEPAL และ CHANGAN สำหรับที่ปรึกษาการขาย JIN MOTOR",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
