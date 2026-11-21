@@ -1,4 +1,4 @@
-import { DOWN_PERCENT_TIERS } from '../data/defaultCatalog';
+import { ALL_BENEFIT_KEYS, DOWN_PERCENT_TIERS } from '../data/defaultCatalog';
 import {
   CalculatedQuote,
   DealerSettings,
@@ -110,10 +110,47 @@ export function calculateQuote(
   const isRateUnavailable =
     state.customInterestRate === null && tableRate === null;
 
-  const baseRate =
+  const baseInterestRate =
     state.customInterestRate !== null
       ? state.customInterestRate
       : tableRate ?? 0;
+
+  const specialDiscountActive = Boolean(state.enableSpecialInterestDiscount);
+  const specialDiscountMode =
+    state.specialInterestDiscountMode === 'target_rate'
+      ? 'target_rate'
+      : 'discount_rate';
+  const specialDiscountLabel =
+    (state.specialInterestLabel ?? '').trim() || 'ส่วนลดดอกเบี้ยพิเศษ';
+
+  let specialInterestDiscountApplied = 0;
+  let rateAfterSpecialDiscount = baseInterestRate;
+
+  if (specialDiscountActive) {
+    if (
+      specialDiscountMode === 'target_rate' &&
+      state.specialInterestTargetRate !== null &&
+      state.specialInterestTargetRate !== undefined &&
+      !Number.isNaN(Number(state.specialInterestTargetRate))
+    ) {
+      rateAfterSpecialDiscount = Math.max(
+        0,
+        Number(Number(state.specialInterestTargetRate).toFixed(2))
+      );
+      specialInterestDiscountApplied = Number(
+        (baseInterestRate - rateAfterSpecialDiscount).toFixed(2)
+      );
+    } else {
+      specialInterestDiscountApplied = Math.max(
+        0,
+        Number(Number(state.specialInterestDiscountRate || 0).toFixed(2))
+      );
+      rateAfterSpecialDiscount = Math.max(
+        0,
+        Number((baseInterestRate - specialInterestDiscountApplied).toFixed(2))
+      );
+    }
+  }
 
   const earlyPaymentDiscountApplied = state.payFirstInstallmentOnDelivery
     ? settings.earlyPaymentDiscount
@@ -121,7 +158,7 @@ export function calculateQuote(
 
   const effectiveInterestRate = Math.max(
     0,
-    Number((baseRate - earlyPaymentDiscountApplied).toFixed(2))
+    Number((rateAfterSpecialDiscount - earlyPaymentDiscountApplied).toFixed(2))
   );
 
   const tenorYears = state.tenorMonths / 12;
@@ -133,7 +170,11 @@ export function calculateQuote(
     state.tenorMonths > 0 ? Math.round(totalPayable / state.tenorMonths) : 0;
 
   const firstInstallmentDueOnDelivery = state.payFirstInstallmentOnDelivery
-    ? monthlyInstallment
+    ? state.customFirstInstallmentAmount !== null &&
+      state.customFirstInstallmentAmount !== undefined &&
+      !Number.isNaN(Number(state.customFirstInstallmentAmount))
+      ? Math.max(0, Math.round(Number(state.customFirstInstallmentAmount)))
+      : monthlyInstallment
     : 0;
 
   const registrationFee = Math.max(0, state.registrationFee);
@@ -166,6 +207,16 @@ export function calculateQuote(
   const excessSubsidyFinal = isCashPurchase ? 0 : excessSubsidy;
   const includeSubsidyVatFinal = isCashPurchase ? false : includeSubsidyVat;
   const subsidyVatAmountFinal = isCashPurchase ? 0 : subsidyVatAmount;
+  const baseInterestRateFinal = isCashPurchase ? 0 : baseInterestRate;
+  const specialDiscountActiveFinal = isCashPurchase
+    ? false
+    : specialDiscountActive;
+  const specialInterestDiscountAppliedFinal = isCashPurchase
+    ? 0
+    : specialInterestDiscountApplied;
+  const rateAfterSpecialDiscountFinal = isCashPurchase
+    ? 0
+    : rateAfterSpecialDiscount;
   const financeAmountFinal = isCashPurchase ? 0 : financeAmount;
   const effectiveInterestRateFinal = isCashPurchase ? 0 : effectiveInterestRate;
   const totalInterestFinal = isCashPurchase ? 0 : totalInterest;
@@ -186,9 +237,22 @@ export function calculateQuote(
       bookingDeposit
   );
 
+  const selectedBenefitKeys = state.selectedBenefitKeys ?? ALL_BENEFIT_KEYS;
+  const disabledExtraIndices = state.disabledExtraBenefitIndices ?? [];
+  const enabledBenefitTexts: string[] = [
+    ...ALL_BENEFIT_KEYS.filter((key) => selectedBenefitKeys.includes(key))
+      .map((key) => activeBenefits[key]?.trim() || '')
+      .filter(Boolean),
+    ...activeBenefits.extraItems
+      .filter((_, idx) => !disabledExtraIndices.includes(idx))
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+
   return {
     trim,
     activeBenefits,
+    enabledBenefitTexts,
     isCashPurchase,
     normalPrice,
     baseSpecialPrice,
@@ -211,6 +275,11 @@ export function calculateQuote(
     tierMatched,
     tableRate,
     isRateUnavailable,
+    baseInterestRate: baseInterestRateFinal,
+    specialDiscountActive: specialDiscountActiveFinal,
+    specialDiscountLabel,
+    specialInterestDiscountApplied: specialInterestDiscountAppliedFinal,
+    rateAfterSpecialDiscount: rateAfterSpecialDiscountFinal,
     earlyPaymentDiscountApplied,
     effectiveInterestRate: effectiveInterestRateFinal,
     totalInterest: totalInterestFinal,
@@ -248,8 +317,8 @@ export function buildLineShareText(
   );
 
   const lines: string[] = [
-    `🚗 ${calc.trim.modelName} ${calc.trim.trimName}`,
-    state.customerName.trim() ? `เรียนคุณ: ${state.customerName.trim()}` : '',
+    `🚗 ใบเสนอราคา ${calc.trim.modelName} ${calc.trim.trimName}`,
+    state.customerName.trim() ? `เรียน คุณ${state.customerName.trim()}` : '',
     state.customerPhone.trim() ? `📞 โทร: ${state.customerPhone.trim()}` : '',
     state.bookingDetails?.trim()
       ? `📋 รายละเอียดการจอง: ${state.bookingDetails.trim()}`
@@ -259,13 +328,16 @@ export function buildLineShareText(
       ? `💰 ราคาปกติ: ${formatTHB(calc.normalPrice)} บาท`
       : `💰 ราคารถ: ${formatTHB(calc.normalPrice)} บาท`,
     calc.vehicleDiscount > 0
-      ? `🏷️ ส่วนลดราคาตัวรถ: -${formatTHB(calc.vehicleDiscount)} บาท`
+      ? `🏷️ ส่วนลดตัวรถ: -${formatTHB(calc.vehicleDiscount)} บาท`
       : '',
     calc.netCarPrice !== calc.normalPrice
-      ? `💰 ราคารถสุทธิ: ${formatTHB(calc.netCarPrice)} บาท`
+      ? `✨ ราคารถสุทธิ: ${formatTHB(calc.netCarPrice)} บาท`
       : '',
-    calc.downPaymentSubsidy > 0
-      ? `🎉 ส่วนลดเงินดาวน์ / ซับดาวน์: ${formatTHB(calc.downPaymentSubsidy)} บาท`
+    !calc.isCashPurchase && calc.downPaymentSubsidy > 0
+      ? `🎉 ส่วนลดเงินดาวน์ (ซับดาวน์): ${formatTHB(calc.downPaymentSubsidy)} บาท`
+      : '',
+    state.promotionNote.trim()
+      ? `🔥 โปรโมชั่น: ${state.promotionNote.trim()}`
       : '',
     ``,
     `⸻`,
@@ -276,29 +348,32 @@ export function buildLineShareText(
           `• ราคารถสุทธิ: ${formatTHB(calc.netCarPrice)} บาท`,
         ]
       : [
-          `📌 รายละเอียดการผ่อนชำระ`,
+          `📌 รายละเอียดเงินดาวน์และค่างวด`,
           ``,
           `• เงินดาวน์ (${downPctLabel}): ${formatTHB(calc.downPaymentGross)} บาท`,
           `• ยอดจัดไฟแนนซ์: ${formatTHB(calc.financeAmount)} บาท`,
           `• ระยะเวลาผ่อน: ${calc.tenorMonths} เดือน (${calc.tenorYears} ปี)`,
           `• อัตราดอกเบี้ย: ${calc.effectiveInterestRate.toFixed(2)}% ต่อปี${
-            state.payFirstInstallmentOnDelivery ? ' (ลดต้นงวดแล้ว)' : ''
+            state.payFirstInstallmentOnDelivery ? ' (หักส่วนลดชำระงวดแรกวันรับรถแล้ว)' : ''
           }`,
-          `• ดอกเบี้ยทั้งหมด: ${formatTHBDecimal(calc.totalInterest)} บาท`,
-          `• ยอดชำระรวม: ${formatTHBDecimal(calc.totalPayable)} บาท`,
-          `• ค่างวดประมาณ: ${formatTHB(calc.monthlyInstallment)} บาท/เดือนครับ`,
+          calc.specialDiscountActive
+            ? `• ${calc.specialDiscountLabel}: จาก ${calc.baseInterestRate.toFixed(2)}% เหลือ ${calc.rateAfterSpecialDiscount.toFixed(2)}%`
+            : '',
+          `• ดอกเบี้ยรวม: ${formatTHBDecimal(calc.totalInterest)} บาท`,
+          `• ยอดชำระรวมไฟแนนซ์: ${formatTHBDecimal(calc.totalPayable)} บาท`,
+          `• ค่างวดประมาณ: ${formatTHB(calc.monthlyInstallment)} บาท/เดือน`,
         ]),
     ``,
     `⸻`,
     ``,
-    `💵 ยอดชำระวันรับรถ`,
+    `💵 สรุปยอดชำระวันรับรถ`,
     ``,
     ...(calc.isCashPurchase
       ? [`ราคารถสุทธิ (ซื้อสด) = ${formatTHB(calc.netCarPrice)} บาท`]
       : [
           `เงินดาวน์ ${downPctLabel} = ${formatTHB(calc.downPaymentGross)} บาท`,
           calc.downPaymentSubsidy > 0
-            ? `หักส่วนลดเงินดาวน์ ${formatTHB(calc.downPaymentSubsidy)} บาท`
+            ? `หักส่วนลดเงินดาวน์ (ซับดาวน์) = -${formatTHB(calc.downPaymentSubsidy)} บาท`
             : '',
           `➡️ เงินดาวน์คงเหลือ = ${formatTHB(calc.netDownPayment)} บาท`,
           calc.includeVat && calc.subsidyVatAmount > 0
@@ -328,33 +403,23 @@ export function buildLineShareText(
       ? `หักเงินจองรถยนต์ = -${formatTHB(calc.bookingDeposit)} บาท`
       : '',
     ``,
-    `✅ ยอดชำระวันรับรถสุทธิ${calc.isCashPurchase ? ' (ซื้อสด)' : ''} = ${formatTHB(calc.totalDeliveryCashDue)} บาทครับ`,
-    ``,
-    `⸻`,
-    ``,
-    `🛡️ สิทธิประโยชน์และการรับประกัน (${calc.trim.packageTitle})`,
-    `• ${calc.activeBenefits.insuranceAndAct}`,
-    `• ${calc.activeBenefits.homeCharger}`,
-    `• ${calc.activeBenefits.vehicleWarranty}`,
-    `• ${calc.activeBenefits.batteryWarranty}`,
-    `• ${calc.activeBenefits.lifetimeBatteryWarranty}`,
-    `• ${calc.activeBenefits.roadsideAssistance}`,
-    ...calc.activeBenefits.extraItems.map((b) => `• ${b}`),
+    `✅ ยอดชำระวันรับรถสุทธิ${calc.isCashPurchase ? ' (ซื้อสด)' : ''} = ${formatTHB(calc.totalDeliveryCashDue)} บาท`,
   ];
 
-  if (
-    selectedFreebies.length > 0 ||
-    state.customFreebieNote.trim() ||
-    state.promotionNote.trim()
-  ) {
+  if (calc.enabledBenefitTexts.length > 0) {
     lines.push(``);
-    lines.push(`🎁 ของแถมและโปรโมชั่น`);
+    lines.push(`⸻`);
+    lines.push(``);
+    lines.push(`🛡️ สิทธิประโยชน์และการรับประกัน (${calc.trim.packageTitle})`);
+    calc.enabledBenefitTexts.forEach((b) => lines.push(`• ${b}`));
+  }
+
+  if (selectedFreebies.length > 0 || state.customFreebieNote.trim()) {
+    lines.push(``);
+    lines.push(`🎁 รายการของแถมเพิ่มเติม`);
     selectedFreebies.forEach((f) => lines.push(`• ${f}`));
     if (state.customFreebieNote.trim()) {
       lines.push(`• ${state.customFreebieNote.trim()}`);
-    }
-    if (state.promotionNote.trim()) {
-      lines.push(`• โปรโมชั่น: ${state.promotionNote.trim()}`);
     }
   }
 
@@ -365,7 +430,7 @@ export function buildLineShareText(
 
   if (!state.anonymousMode) {
     lines.push(``);
-    lines.push(`ติดต่อ ${showroom.salesName} (${showroom.showroomName})`);
+    lines.push(`สอบถามรายละเอียดเพิ่มเติม ติดต่อ ${showroom.salesName} (${showroom.showroomName})`);
     lines.push(`โทร: ${showroom.salesPhone || showroom.phone} | LINE: ${showroom.lineId}`);
   }
 
@@ -385,4 +450,53 @@ export function buildLineShareText(
 
 export function getLineShareUrl(text: string): string {
   return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
+}
+
+export function buildFinanceSubmissionLineText(
+  state: QuoteState,
+  calc: CalculatedQuote
+): string {
+  const downPctText = Number.isInteger(Number(calc.downPercentActual.toFixed(1)))
+    ? String(Math.round(calc.downPercentActual))
+    : calc.downPercentActual.toFixed(1);
+
+  const lines: string[] = [
+    'ส่งงานครับ',
+    '',
+    `คุณ: ${state.customerName.trim() || '-'}`,
+    '',
+    `เบอร์โทร: ${state.customerPhone.trim() || '-'}`,
+    '',
+    `รุ่น: ${calc.trim.modelName} ${calc.trim.trimName}`,
+    '',
+    `สี: ${(state.vehicleColor || '').trim() || '-'}`,
+    '',
+    `ราคา: ${formatTHB(calc.netCarPrice)} บาท`,
+    '',
+    `ดาวน์ ${downPctText}%: ${formatTHB(calc.downPaymentGross)} บาท`,
+    '',
+    `ยอดจัด: ${formatTHB(calc.financeAmount)} บาท`,
+    '',
+    `ดอกเบี้ย: ${calc.effectiveInterestRate.toFixed(2)}% ต่อปี`,
+  ];
+
+  if (
+    !calc.isCashPurchase &&
+    state.payFirstInstallmentOnDelivery &&
+    calc.firstInstallmentDueOnDelivery > 0
+  ) {
+    lines.push('');
+    lines.push(
+      `ชำระงวดแรก จำนวน ${formatTHB(calc.firstInstallmentDueOnDelivery)} บาท`
+    );
+  }
+
+  lines.push('');
+  lines.push(
+    `ผ่อน: ${calc.tenorMonths} งวด งวดละ ${formatTHB(calc.monthlyInstallment)} บาท`
+  );
+  lines.push('');
+  lines.push(`หมายเหตุ: ${(state.financeNote || '').trim() || '-'}`);
+
+  return lines.join('\n');
 }

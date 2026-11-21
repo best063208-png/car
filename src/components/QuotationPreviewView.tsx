@@ -13,8 +13,10 @@ import {
   EyeOff,
   FilePlus2,
   FileText,
+  HelpCircle,
   Image as ImageIcon,
   MessageSquare,
+  Palette,
   Printer,
   Send,
   Share2,
@@ -25,6 +27,7 @@ import {
   QuoteSession,
   WizardStep,
 } from '../types/dealer';
+import { ExportImageFormat } from '../utils/exportQuote';
 import {
   calculateQuote,
   formatTHB,
@@ -50,8 +53,11 @@ interface QuotationPreviewViewProps {
   onToggleAnonymousMode: () => void;
   onCopyText: () => void;
   onShareImage: () => void;
-  onExportImage: () => void;
+  onExportImage: (format: ExportImageFormat) => void;
   onExportPdf: () => void;
+  onPrintQuotation: () => void;
+  onOpenGalleryGuide: () => void;
+  onOpenDesignSettings: () => void;
 }
 
 const STEP_EDIT_LINKS: { step: Exclude<WizardStep, 'preview'>; label: string }[] = [
@@ -87,7 +93,7 @@ function formatSessionOptionLabel(
   const payment = c.isCashPurchase
     ? 'ซื้อสด'
     : `${formatTHB(c.monthlyInstallment)} ฿/ด. · ${c.tenorMonths} งวด`;
-  return `${rankPrefix}${item.quoteNumber} — ${customer} (${c.trim.modelName} ${c.trim.trimName} | ${payment})`;
+  return `${rankPrefix}${c.trim.modelName} ${c.trim.trimName} — ${customer} (${payment})`;
 }
 
 export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
@@ -107,6 +113,9 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
   onShareImage,
   onExportImage,
   onExportPdf,
+  onPrintQuotation,
+  onOpenGalleryGuide,
+  onOpenDesignSettings,
 }) => {
   const sortedSessions = useMemo(() => {
     return [...quoteSessions].sort((a, b) => {
@@ -123,6 +132,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
   }, [quoteSessions]);
 
   const [showTextPreview, setShowTextPreview] = useState(false);
+  const [imageFormat, setImageFormat] = useState<ExportImageFormat>('png');
   const [previewMode, setPreviewMode] = useState<'single' | 'compare'>('single');
   const [quoteAId, setQuoteAId] = useState<string>(
     () => sortedSessions[0]?.id || session.id
@@ -230,14 +240,14 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
       {/* Top Bar: Mode Switcher + Quick-Jump / Share Controls */}
       <div className="no-print max-w-[960px] mx-auto card-premium rounded-2xl overflow-hidden">
         <div className="h-1 gold-copper-bar" />
-        <div className="p-5 sm:p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-5">
           {/* Top Headline + View Mode Toggle + Anonymous + Back */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
             <div>
-              <div className="text-xs font-mono-num font-bold text-amber-700 dark:text-amber-400">
+              <div className="text-xs font-bold text-amber-700 dark:text-amber-400">
                 {previewMode === 'compare'
                   ? `เปรียบเทียบใบเสนอราคา (${quoteSessions.length} รายการที่บันทึกไว้)`
-                  : `${session.quoteNumber} · ใบเสนอราคาสำเร็จรูป`}
+                  : 'ใบเสนอราคาสำเร็จรูป'}
               </div>
               <h1 className="text-lg sm:text-xl font-extrabold text-slate-950 dark:text-white mt-0.5">
                 {previewMode === 'compare'
@@ -250,13 +260,13 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
               </h1>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+            <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-start lg:self-auto">
               {/* Single vs Side-by-Side Comparison Switcher */}
               <div className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
                 <button
                   type="button"
                   onClick={() => setPreviewMode('single')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                  className={`min-h-[38px] px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
                     previewMode === 'single'
                       ? 'bg-gradient-to-r from-slate-950 to-slate-800 dark:from-[#162652] dark:to-[#1e336b] text-amber-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -271,7 +281,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                     selectLatestTwo();
                     setPreviewMode('compare');
                   }}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+                  className={`min-h-[38px] px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
                     previewMode === 'compare'
                       ? 'bg-gradient-to-r from-slate-950 to-slate-800 dark:from-[#162652] dark:to-[#1e336b] text-amber-300 shadow-sm'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -287,7 +297,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                   type="button"
                   aria-pressed={isAnonymous}
                   onClick={onToggleAnonymousMode}
-                  className={`px-3.5 py-2 text-xs font-bold rounded-xl border inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-all ${
+                  className={`min-h-[42px] px-3.5 py-2 text-xs font-bold rounded-xl border inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition-all ${
                     isAnonymous
                       ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60 shadow-sm'
                       : 'bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
@@ -307,29 +317,40 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
               <button
                 type="button"
                 onClick={() => onJumpToStep(5)}
-                className="px-4 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="min-h-[42px] px-4 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                กลับไปแก้ไขขั้นตอน
+                ย้อนกลับไปแก้ไข
               </button>
             </div>
           </div>
 
           {previewMode === 'single' && (
             <>
-              {/* Quick Jump to Any Step */}
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
-                  <Edit3 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  แก้ไขข้อมูลรายขั้นตอนได้ทันที (ข้อมูลเดิมทั้งหมดจะยังอยู่ครบ)
+              {/* Quick Jump to Any Step + Design Quick Tool */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Edit3 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    แก้ไขข้อมูลรายขั้นตอน หรือดีไซน์ใบเสนอราคาได้ทันที
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenDesignSettings}
+                    className="min-h-[38px] px-3 py-1.5 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] dark:hover:bg-[#1e336b] text-amber-300 border border-transparent dark:border-amber-400/40 rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Palette className="w-3.5 h-3.5" />
+                    ปรับแต่งสี / โลโก้ / ฟอนต์
+                  </button>
                 </div>
+
                 <div className="flex flex-wrap gap-2">
                   {STEP_EDIT_LINKS.map((item) => (
                     <button
                       key={item.step}
                       type="button"
                       onClick={() => onJumpToStep(item.step)}
-                      className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-amber-50 dark:bg-slate-900 dark:hover:bg-[#162652] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                      className="min-h-[38px] px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-amber-50 dark:bg-slate-900 dark:hover:bg-[#162652] text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-amber-400 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
                     >
                       {item.label}
                     </button>
@@ -343,7 +364,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                 <div className="p-4 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/60 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="w-7 h-7 rounded-lg bg-[#06C755] text-white inline-flex items-center justify-center shrink-0">
+                      <span className="w-8 h-8 rounded-lg bg-[#06C755] text-white inline-flex items-center justify-center shrink-0">
                         <MessageSquare className="w-4 h-4" />
                       </span>
                       <div>
@@ -357,12 +378,12 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
                     <a
                       href={lineShareUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-[#06C755] to-[#049e42] hover:from-[#07d65c] hover:to-[#05b84d] text-white rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shadow-sm transition-all"
+                      className="min-h-[44px] px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-[#06C755] to-[#049e42] hover:from-[#07d65c] hover:to-[#05b84d] text-white rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap shadow-sm transition-all"
                     >
                       <Send className="w-3.5 h-3.5" />
                       ส่งเข้า LINE ทันที
@@ -370,7 +391,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                     <button
                       type="button"
                       onClick={onCopyText}
-                      className="px-3.5 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      className="min-h-[44px] px-3.5 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
                     >
                       <Copy className="w-3.5 h-3.5" />
                       คัดลอกข้อความ
@@ -378,7 +399,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowTextPreview((v) => !v)}
-                      className="px-2.5 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      className="col-span-2 sm:col-auto min-h-[40px] px-2.5 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:underline inline-flex items-center justify-center gap-1 cursor-pointer"
                     >
                       {showTextPreview ? (
                         <>
@@ -393,57 +414,98 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                   </div>
                 </div>
 
-                {/* Mode 2: LINE Image & Document Export */}
+                {/* Mode 2: Gallery Image Save, LINE Share, PDF & Print */}
                 <div className="p-4 rounded-xl bg-amber-50/50 dark:bg-slate-900/80 border border-amber-200 dark:border-slate-700 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-lg btn-gold-copper text-slate-950 inline-flex items-center justify-center shrink-0">
-                      <ImageIcon className="w-4 h-4" />
-                    </span>
-                    <div>
-                      <div className="text-xs font-bold text-slate-950 dark:text-white">
-                        โหมดที่ 2: ส่งเป็นรูปภาพทาง LINE / PDF
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-8 h-8 rounded-lg btn-gold-copper text-slate-950 inline-flex items-center justify-center shrink-0">
+                        <ImageIcon className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <div className="text-xs font-bold text-slate-950 dark:text-white">
+                          โหมดที่ 2: บันทึกรูปลงแกลเลอรี / แชร์ / พิมพ์
+                        </div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                          รองรับ iPhone Photos, Android Gallery, AirPrint และ PDF
+                        </div>
                       </div>
-                      <div className="text-[11px] text-slate-600 dark:text-slate-400">
-                        การ์ดใบเสนอราคาความละเอียดสูงพร้อมโลโก้และโปรโมชั่น
-                      </div>
+                    </div>
+
+                    {/* PNG / JPG Format Toggle */}
+                    <div className="inline-flex items-center p-0.5 rounded-lg bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700">
+                      {(['png', 'jpg'] as ExportImageFormat[]).map((fmt) => (
+                        <button
+                          key={fmt}
+                          type="button"
+                          onClick={() => setImageFormat(fmt)}
+                          className={`min-h-[30px] px-2.5 py-1 text-[11px] font-extrabold rounded-md uppercase transition-all cursor-pointer ${
+                            imageFormat === fmt
+                              ? 'bg-slate-950 dark:bg-[#162652] text-amber-300'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isExporting}
+                      onClick={() => onExportImage(imageFormat)}
+                      className="btn-gold-copper min-h-[46px] px-3.5 py-2.5 text-xs font-extrabold disabled:opacity-60 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
+                    >
+                      <Download className="w-4 h-4 shrink-0" />
+                      <span>
+                        {isExporting
+                          ? 'กำลังสร้างรูป...'
+                          : `บันทึกรูป (${imageFormat.toUpperCase()})`}
+                      </span>
+                    </button>
+
                     <button
                       type="button"
                       disabled={isExporting}
                       onClick={onShareImage}
-                      className="btn-gold-copper px-3.5 py-2 text-xs font-extrabold disabled:opacity-60 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      className="min-h-[46px] px-3.5 py-2.5 text-xs font-bold bg-[#06C755] hover:bg-[#05b34c] disabled:opacity-60 text-white rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer shadow-sm"
                     >
-                      <Share2 className="w-3.5 h-3.5" />
-                      แชร์รูปส่ง LINE
+                      <Share2 className="w-4 h-4 shrink-0" />
+                      <span>แชร์ส่ง LINE</span>
                     </button>
-                    <button
-                      type="button"
-                      disabled={isExporting}
-                      onClick={onExportImage}
-                      className="px-3.5 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-60 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      บันทึก PNG
-                    </button>
+
                     <button
                       type="button"
                       disabled={isExporting}
                       onClick={onExportPdf}
-                      className="btn-midnight px-3.5 py-2 text-xs font-semibold disabled:opacity-60 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap border border-transparent dark:border-slate-700 cursor-pointer"
+                      className="btn-midnight min-h-[46px] px-3.5 py-2.5 text-xs font-semibold disabled:opacity-60 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap border border-transparent dark:border-slate-700 cursor-pointer"
                     >
-                      <FileText className="w-3.5 h-3.5 text-amber-300" />
-                      PDF
+                      <FileText className="w-4 h-4 text-amber-300 shrink-0" />
+                      <span>บันทึก PDF</span>
                     </button>
+
                     <button
                       type="button"
-                      onClick={() => window.print()}
-                      className="px-3 py-2 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                      onClick={onPrintQuotation}
+                      className="min-h-[46px] px-3.5 py-2.5 text-xs font-extrabold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border-2 border-slate-300 dark:border-slate-600 rounded-xl inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
                     >
-                      <Printer className="w-3.5 h-3.5" />
-                      พิมพ์
+                      <Printer className="w-4 h-4 text-amber-600 dark:text-amber-300 shrink-0" />
+                      <span>พิมพ์ / PRINT</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      ตั้งชื่อไฟล์ตามรุ่นรถให้อัตโนมัติ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onOpenGalleryGuide}
+                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:underline inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" />
+                      วิธีอนุญาตบันทึกรูป
                     </button>
                   </div>
                 </div>
@@ -481,7 +543,6 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
           settings={settings}
           state={session.state}
           calc={calc}
-          quoteNumber={session.quoteNumber}
         />
       ) : (
         <div className="max-w-[960px] mx-auto space-y-5">
@@ -489,7 +550,7 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
             <div className="no-print card-premium rounded-2xl p-5 sm:p-6 border border-amber-300/70 dark:border-amber-500/30 bg-amber-50/50 dark:bg-slate-900/90 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <div className="text-sm font-extrabold text-slate-950 dark:text-white">
-                  มีใบเสนอราคาที่บันทึกไว้เพียง 1 รายการ ({session.quoteNumber})
+                  มีใบเสนอราคาที่บันทึกไว้เพียง 1 รายการ ({calc.trim.modelName} · {calc.trim.trimName})
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                   คัดลอกใบเสนอราคาปัจจุบันเพื่อปรับเงื่อนไข (เช่น เปลี่ยนเงินดาวน์ งวด หรือซื้อสด) หรือสร้างใบเสนอราคาใหม่อีกรุ่นเพื่อนำมาเทียบแบบเคียงข้าง
@@ -662,9 +723,6 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                       >
                         {tag}
                       </span>
-                      <span className="text-xs font-mono-num text-amber-300 font-semibold">
-                        {item.quoteNumber}
-                      </span>
                     </div>
                     <div className="text-base font-extrabold mt-1">
                       {c.trim.modelName} · {c.trim.trimName}
@@ -716,17 +774,17 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                   ตารางเปรียบเทียบรายละเอียดค่างวดและค่าใช้จ่ายรวม
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  เปรียบเทียบความแตกต่างระหว่าง {sessionA.quoteNumber} (A) และ{' '}
-                  {sessionB.quoteNumber} (B)
+                  เปรียบเทียบความแตกต่างระหว่าง {calcA.trim.modelName} (A) และ{' '}
+                  {calcB.trim.modelName} (B)
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="no-print self-start sm:self-auto px-3 py-1.5 text-xs font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                onClick={onPrintQuotation}
+                className="no-print self-start sm:self-auto min-h-[42px] px-3.5 py-2 text-xs font-bold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
               >
-                <Printer className="w-3.5 h-3.5" />
-                พิมพ์ตารางเปรียบเทียบ
+                <Printer className="w-3.5 h-3.5 text-amber-600 dark:text-amber-300" />
+                พิมพ์ / PRINT ตารางเปรียบเทียบ
               </button>
             </div>
 
@@ -738,10 +796,10 @@ export const QuotationPreviewView: React.FC<QuotationPreviewViewProps> = ({
                       รายการเปรียบเทียบ
                     </th>
                     <th className="py-3.5 px-4 text-right min-w-[150px] text-amber-700 dark:text-amber-300">
-                      ใบเสนอราคา A ({sessionA.quoteNumber})
+                      ใบเสนอราคา A ({calcA.trim.modelName})
                     </th>
                     <th className="py-3.5 px-4 text-right min-w-[150px] text-sky-700 dark:text-sky-300">
-                      ใบเสนอราคา B ({sessionB.quoteNumber})
+                      ใบเสนอราคา B ({calcB.trim.modelName})
                     </th>
                     <th className="py-3.5 px-4 sm:px-5 text-right min-w-[140px]">
                       ส่วนต่าง (B เทียบ A)

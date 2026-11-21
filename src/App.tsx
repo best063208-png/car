@@ -1,26 +1,40 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import {
+  AlertCircle,
+  Download,
+  Image as ImageIcon,
+  Plus,
+  Smartphone,
+  X,
+} from 'lucide-react';
 import { BenefitsView } from './components/BenefitsView';
+import { FinanceSubmissionView } from './components/FinanceSubmissionView';
 import { QuotationPreviewView } from './components/QuotationPreviewView';
 import { QuotationSheet } from './components/QuotationSheet';
-import { SettingsView } from './components/SettingsView';
+import { SettingsTab, SettingsView } from './components/SettingsView';
 import { StepWizard } from './components/StepWizard';
 import {
+  ALL_BENEFIT_KEYS,
   createInitialQuoteState,
   createQuoteSession,
+  DEFAULT_QUOTATION_DESIGN,
   DEFAULT_SETTINGS,
 } from './data/defaultCatalog';
 import {
   BenefitCategories,
   DealerSettings,
+  FinanceAttachment,
   QuoteSession,
   QuoteState,
   VehicleTrim,
   WizardStep,
 } from './types/dealer';
 import {
+  ExportImageFormat,
   exportQuotationAsImage,
   exportQuotationAsPdf,
+  isIosDevice,
+  renderNodeToImageDataUrl,
   shareQuotationImage,
 } from './utils/exportQuote';
 import {
@@ -29,7 +43,7 @@ import {
   getLineShareUrl,
 } from './utils/finance';
 
-type AppView = 'calculator' | 'benefits' | 'quotation' | 'settings';
+type AppView = 'calculator' | 'benefits' | 'quotation' | 'finance' | 'settings';
 export type ThemeMode = 'light' | 'dark';
 
 const SETTINGS_STORAGE_KEY = 'jin_motor_dealer_settings_v2';
@@ -87,6 +101,13 @@ function loadSavedSettings(): DealerSettings {
       freebiePresets: Array.isArray(parsed.freebiePresets)
         ? parsed.freebiePresets
         : DEFAULT_SETTINGS.freebiePresets,
+      quotationDesign: {
+        ...DEFAULT_QUOTATION_DESIGN,
+        ...(parsed.quotationDesign || {}),
+      },
+      savedDesigns: Array.isArray(parsed.savedDesigns)
+        ? parsed.savedDesigns
+        : [],
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -127,36 +148,77 @@ function normalizeQuoteState(
       typeof rawState.anonymousMode === 'boolean'
         ? rawState.anonymousMode
         : Boolean(settings.defaultAnonymousMode),
+    selectedBenefitKeys: Array.isArray(rawState.selectedBenefitKeys)
+      ? rawState.selectedBenefitKeys.filter((k) => ALL_BENEFIT_KEYS.includes(k))
+      : [...ALL_BENEFIT_KEYS],
+    disabledExtraBenefitIndices: Array.isArray(
+      rawState.disabledExtraBenefitIndices
+    )
+      ? rawState.disabledExtraBenefitIndices.filter(
+          (i) => typeof i === 'number' && Number.isInteger(i) && i >= 0
+        )
+      : [],
     bookingDetails:
       typeof rawState.bookingDetails === 'string'
         ? rawState.bookingDetails
         : '',
     customDeliveryItems: customItems,
+    enableSpecialInterestDiscount: Boolean(
+      rawState.enableSpecialInterestDiscount
+    ),
+    specialInterestLabel:
+      typeof rawState.specialInterestLabel === 'string'
+        ? rawState.specialInterestLabel
+        : '',
+    specialInterestDiscountMode:
+      rawState.specialInterestDiscountMode === 'target_rate'
+        ? 'target_rate'
+        : 'discount_rate',
+    specialInterestDiscountRate:
+      typeof rawState.specialInterestDiscountRate === 'number' &&
+      !Number.isNaN(rawState.specialInterestDiscountRate)
+        ? Math.max(0, rawState.specialInterestDiscountRate)
+        : 0,
+    specialInterestTargetRate:
+      rawState.specialInterestTargetRate !== null &&
+      rawState.specialInterestTargetRate !== undefined &&
+      !Number.isNaN(Number(rawState.specialInterestTargetRate))
+        ? Math.max(0, Number(rawState.specialInterestTargetRate))
+        : null,
+    customFirstInstallmentAmount:
+      rawState.customFirstInstallmentAmount !== null &&
+      rawState.customFirstInstallmentAmount !== undefined &&
+      !Number.isNaN(Number(rawState.customFirstInstallmentAmount))
+        ? Math.max(0, Math.round(Number(rawState.customFirstInstallmentAmount)))
+        : null,
+    vehicleColor:
+      typeof rawState.vehicleColor === 'string' ? rawState.vehicleColor : '',
+    financeNote:
+      typeof rawState.financeNote === 'string' ? rawState.financeNote : '',
   };
 }
 
 function loadSavedQuoteSessions(settings: DealerSettings): QuoteSession[] {
   try {
     const raw = localStorage.getItem(QUOTES_STORAGE_KEY);
-    if (!raw) return [createQuoteSession(settings, 1)];
+    if (!raw) return [createQuoteSession(settings)];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return [createQuoteSession(settings, 1)];
+      return [createQuoteSession(settings)];
     }
-    return parsed.map((item: Partial<QuoteSession>, index: number) => {
-      const fallback = createQuoteSession(settings, index + 1);
+    return parsed.map((item: Partial<QuoteSession>) => {
+      const fallback = createQuoteSession(settings);
       return {
         ...fallback,
         ...item,
         id: item.id || fallback.id,
-        quoteNumber: item.quoteNumber || fallback.quoteNumber,
         currentStep: item.currentStep ?? 1,
         hasVisitedPreview: Boolean(item.hasVisitedPreview),
         state: normalizeQuoteState(item.state, settings),
       };
     });
   } catch {
-    return [createQuoteSession(settings, 1)];
+    return [createQuoteSession(settings)];
   }
 }
 
@@ -175,12 +237,21 @@ export default function App() {
     }
   });
   const [activeView, setActiveView] = useState<AppView>('calculator');
+  const [settingsInitialTab, setSettingsInitialTab] =
+    useState<SettingsTab>('showroom');
   const [theme, setTheme] = useState<ThemeMode>(() => loadSavedTheme());
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(() =>
     loadSavedTimestamp()
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [financeAttachmentsByQuoteId, setFinanceAttachmentsByQuoteId] =
+    useState<Record<string, FinanceAttachment[]>>({});
+  const [galleryModal, setGalleryModal] = useState<{
+    dataUrl: string | null;
+    filename: string;
+    permissionDenied: boolean;
+  } | null>(null);
 
   const exportSheetRef = useRef<HTMLDivElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -300,6 +371,7 @@ export default function App() {
         downPercentInput: nextDownPercent,
         customInterestRate: null,
         benefitsOverride: null,
+        disabledExtraBenefitIndices: [],
       };
     });
   };
@@ -323,26 +395,19 @@ export default function App() {
   };
 
   const handleCreateNewQuote = () => {
-    const nextSeq = quoteSessions.length + 1;
-    const newSession = createQuoteSession(settings, nextSeq);
+    const newSession = createQuoteSession(settings);
     setQuoteSessions((prev) => [newSession, ...prev]);
     setActiveQuoteId(newSession.id);
     setActiveView('calculator');
-    showToast(`สร้างใบเสนอราคาใหม่ (${newSession.quoteNumber}) แล้ว`);
+    showToast('สร้างใบเสนอราคาใหม่เรียบร้อยแล้ว');
   };
 
   const handleDuplicateActiveQuote = () => {
     if (!activeSession) return;
     const now = new Date();
-    const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
-      2,
-      '0'
-    )}${String(now.getDate()).padStart(2, '0')}`;
-    const seqPart = String(quoteSessions.length + 1).padStart(2, '0');
     const cloned: QuoteSession = {
       ...activeSession,
       id: `quote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      quoteNumber: `QT-${datePart}-${seqPart}`,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       currentStep: 3,
@@ -366,7 +431,7 @@ export default function App() {
     setQuoteSessions((prev) => [cloned, ...prev]);
     setActiveQuoteId(cloned.id);
     setActiveView('calculator');
-    showToast(`คัดลอกใบเสนอราคาเป็น ${cloned.quoteNumber} เพื่อแก้ไขเทียบเงื่อนไขแล้ว`);
+    showToast('คัดลอกใบเสนอราคาเพื่อแก้ไขเทียบเงื่อนไขแล้ว');
   };
 
   const handleEditQuoteSession = (
@@ -414,7 +479,7 @@ export default function App() {
   };
 
   const buildSafeFilename = () => {
-    return `${activeSession.quoteNumber}_${calc.trim.modelName}_${calc.trim.trimName}`
+    return `ใบเสนอราคา_${calc.trim.modelName}_${calc.trim.trimName}`
       .replace(/\s+/g, '_')
       .replace(/[^\w\u0E00-\u0E7F-]/g, '');
   };
@@ -422,17 +487,31 @@ export default function App() {
   const handleShareImage = async () => {
     if (!exportSheetRef.current) return;
     setIsExporting(true);
+    const filename = buildSafeFilename();
     try {
       const result = await shareQuotationImage(
         exportSheetRef.current,
-        buildSafeFilename(),
+        filename,
         `ใบเสนอราคา ${calc.trim.modelName} ${calc.trim.trimName}`
       );
-      showToast(
-        result === 'shared'
-          ? 'เปิดหน้าต่างแชร์รูปภาพเข้า LINE เรียบร้อยแล้ว'
-          : 'ดาวน์โหลดรูปภาพใบเสนอราคาแล้ว สามารถส่งต่อเข้า LINE ได้ทันที'
-      );
+      if (result === 'permission_denied') {
+        const fallbackUrl = await renderNodeToImageDataUrl(
+          exportSheetRef.current,
+          'png'
+        ).catch(() => null);
+        setGalleryModal({
+          dataUrl: fallbackUrl,
+          filename: `${filename}.png`,
+          permissionDenied: true,
+        });
+        showToast('สิทธิ์เข้าถึงรูปภาพ/การแชร์ถูกจำกัด กรุณาดูวิธีอนุญาตหรือกดค้างที่รูปเพื่อบันทึก');
+      } else {
+        showToast(
+          result === 'shared'
+            ? 'เปิดหน้าต่างแชร์รูปภาพเข้า LINE เรียบร้อยแล้ว'
+            : 'บันทึกรูปภาพใบเสนอราคาแล้ว สามารถส่งต่อเข้า LINE ได้ทันที'
+        );
+      }
     } catch (err) {
       if (!(err instanceof Error && err.name === 'AbortError')) {
         showToast('เกิดข้อผิดพลาดในการสร้างรูปภาพสำหรับแชร์');
@@ -442,16 +521,70 @@ export default function App() {
     }
   };
 
-  const handleExportImage = async () => {
+  const handleExportImage = async (format: ExportImageFormat = 'png') => {
     if (!exportSheetRef.current) return;
     setIsExporting(true);
+    const filename = buildSafeFilename();
     try {
-      await exportQuotationAsImage(exportSheetRef.current, buildSafeFilename());
-      showToast('บันทึกใบเสนอราคาเป็นรูปภาพ PNG เรียบร้อยแล้ว');
-    } catch {
-      showToast('เกิดข้อผิดพลาดในการสร้างรูปภาพ');
+      const result = await exportQuotationAsImage(
+        exportSheetRef.current,
+        filename,
+        format,
+        `ใบเสนอราคา ${calc.trim.modelName} ${calc.trim.trimName}`
+      );
+      if (result.method === 'share_sheet') {
+        showToast(
+          'เปิดเมนูแชร์ iPhone แล้ว — แตะ "บันทึกรูปภาพ" (Save Image) เพื่อลง Photos'
+        );
+      } else if (result.method === 'permission_denied') {
+        setGalleryModal({
+          dataUrl: result.dataUrl,
+          filename: result.filename,
+          permissionDenied: true,
+        });
+        showToast('ไม่สามารถบันทึกอัตโนมัติได้ กรุณาตรวจสอบสิทธิ์รูปภาพหรือกดค้างเพื่อบันทึก');
+      } else if (isIosDevice()) {
+        // On iPhone Safari inside embedded views, also display long-press save dialog
+        setGalleryModal({
+          dataUrl: result.dataUrl,
+          filename: result.filename,
+          permissionDenied: false,
+        });
+        showToast('สร้างรูปภาพแล้ว — สามารถกดค้างที่รูปเพื่อบันทึกลง Photos ได้ทันที');
+      } else {
+        showToast(`บันทึกรูปภาพ ${result.filename} เรียบร้อยแล้ว`);
+      }
+    } catch (err) {
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        showToast('เกิดข้อผิดพลาดในการสร้างรูปภาพ');
+      }
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleOpenGalleryGuide = async () => {
+    const filename = `${buildSafeFilename()}.png`;
+    let dataUrl: string | null = null;
+    if (exportSheetRef.current) {
+      try {
+        dataUrl = await renderNodeToImageDataUrl(exportSheetRef.current, 'png');
+      } catch {
+        dataUrl = null;
+      }
+    }
+    setGalleryModal({
+      dataUrl,
+      filename,
+      permissionDenied: false,
+    });
+  };
+
+  const handlePrintQuotation = () => {
+    try {
+      window.print();
+    } catch {
+      showToast('ไม่สามารถเปิดหน้าต่างพิมพ์ได้บนเบราว์เซอร์นี้ กรุณาลองกดปุ่มพิมพ์ของเบราว์เซอร์หรือบันทึกเป็น PDF');
     }
   };
 
@@ -485,7 +618,7 @@ export default function App() {
   const handleResetDefaults = () => {
     setSettings(DEFAULT_SETTINGS);
     setLastSavedAt(null);
-    const fresh = createQuoteSession(DEFAULT_SETTINGS, 1);
+    const fresh = createQuoteSession(DEFAULT_SETTINGS);
     setQuoteSessions([fresh]);
     setActiveQuoteId(fresh.id);
     setActiveView('calculator');
@@ -496,14 +629,100 @@ export default function App() {
     showToast('คืนค่าข้อมูลเริ่มต้นทั้งหมดเรียบร้อยแล้ว');
   };
 
+  const handleUpdateSessionStateById = (
+    sessionId: string,
+    updater: (prev: QuoteState) => QuoteState
+  ) => {
+    setQuoteSessions((prevList) =>
+      prevList.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              state: updater(item.state),
+              updatedAt: new Date().toISOString(),
+            }
+          : item
+      )
+    );
+  };
+
+  const handleAddFinanceAttachments = (sessionId: string, files: File[]) => {
+    const newItems: FinanceAttachment[] = files.map((file, idx) => ({
+      id: `att-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+    setFinanceAttachmentsByQuoteId((prev) => ({
+      ...prev,
+      [sessionId]: [...(prev[sessionId] || []), ...newItems],
+    }));
+  };
+
+  const handleReplaceFinanceAttachment = (
+    sessionId: string,
+    attachmentId: string,
+    file: File
+  ) => {
+    setFinanceAttachmentsByQuoteId((prev) => {
+      const list = prev[sessionId] || [];
+      return {
+        ...prev,
+        [sessionId]: list.map((item) => {
+          if (item.id !== attachmentId) return item;
+          URL.revokeObjectURL(item.previewUrl);
+          return {
+            id: item.id,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            file,
+            previewUrl: URL.createObjectURL(file),
+          };
+        }),
+      };
+    });
+  };
+
+  const handleRemoveFinanceAttachment = (
+    sessionId: string,
+    attachmentId: string
+  ) => {
+    setFinanceAttachmentsByQuoteId((prev) => {
+      const list = prev[sessionId] || [];
+      const target = list.find((item) => item.id === attachmentId);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return {
+        ...prev,
+        [sessionId]: list.filter((item) => item.id !== attachmentId),
+      };
+    });
+  };
+
+  const handleClearFinanceAttachments = (sessionId: string) => {
+    setFinanceAttachmentsByQuoteId((prev) => {
+      const list = prev[sessionId] || [];
+      list.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+  };
+
   const navItems: { id: AppView; label: string }[] = [
     { id: 'calculator', label: 'กรอก 5 ขั้นตอน' },
     { id: 'benefits', label: 'สิทธิประโยชน์' },
     { id: 'quotation', label: 'ใบเสนอราคา' },
+    { id: 'finance', label: 'ส่งงานไฟแนนซ์' },
     { id: 'settings', label: 'ตั้งค่า' },
   ];
 
   const handleNavClick = (viewId: AppView) => {
+    if (viewId === 'settings') {
+      setSettingsInitialTab('showroom');
+    }
     setActiveView(viewId);
     if (viewId === 'calculator' && activeSession.currentStep === 'preview') {
       updateActiveSession((s) => ({ ...s, currentStep: 1 }));
@@ -515,12 +734,12 @@ export default function App() {
       {/* Top Bar Contract: 3 Zones Only */}
       <header className="no-print sticky top-0 z-30 header-midnight border-b border-amber-400/25">
         <div className="h-1 gold-copper-bar" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-8">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-8">
           {/* Zone 1: Brand Wordmark */}
           <button
             type="button"
             onClick={() => handleNavClick('calculator')}
-            className="text-lg sm:text-xl font-extrabold tracking-tight text-white whitespace-nowrap shrink-0 cursor-pointer"
+            className="text-base sm:text-xl font-extrabold tracking-tight text-white whitespace-nowrap truncate max-w-[55vw] cursor-pointer"
           >
             {activeSession.state.anonymousMode
               ? 'ใบเสนอราคารถยนต์'
@@ -553,18 +772,18 @@ export default function App() {
             <button
               type="button"
               onClick={handleCreateNewQuote}
-              className="btn-gold-copper px-4 py-2 text-xs sm:text-sm font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              className="btn-gold-copper min-h-[40px] px-3 sm:px-4 py-2 text-xs sm:text-sm font-bold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              ใบเสนอราคาใหม่
+              <span>ใบเสนอราคาใหม่</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Mobile Non-Sticky Navigation Strip */}
-      <div className="no-print md:hidden bg-[#0c1733] border-b border-slate-800 px-3 py-2.5">
-        <div className="grid grid-cols-4 gap-1.5 bg-white/5 p-1 rounded-xl border border-white/10">
+      <div className="no-print md:hidden bg-[#0c1733] border-b border-slate-800 px-3 py-2">
+        <div className="flex items-center gap-1 overflow-x-auto bg-white/5 p-1 rounded-xl border border-white/10">
           {navItems.map((item) => {
             const isActive = activeView === item.id;
             return (
@@ -572,7 +791,7 @@ export default function App() {
                 key={item.id}
                 type="button"
                 onClick={() => handleNavClick(item.id)}
-                className={`py-2 px-1 text-xs font-semibold rounded-lg transition-all whitespace-nowrap truncate cursor-pointer ${
+                className={`min-h-[42px] py-2 px-2.5 text-[11px] font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 flex-1 flex items-center justify-center cursor-pointer ${
                   isActive
                     ? 'btn-gold-copper font-bold shadow-sm'
                     : 'text-slate-300 hover:text-white'
@@ -586,7 +805,7 @@ export default function App() {
       </div>
 
       {/* Main Content Viewport */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-5 sm:space-y-6">
         {activeView === 'calculator' && (
           <StepWizard
             settings={settings}
@@ -597,6 +816,7 @@ export default function App() {
             onChangeStep={handleChangeWizardStep}
             onSaveBenefitsToModel={handleSaveBenefitsToModel}
             onOpenBenefitsPage={() => setActiveView('benefits')}
+            onCopyLineText={handleCopyText}
           />
         )}
 
@@ -646,6 +866,33 @@ export default function App() {
             onShareImage={handleShareImage}
             onExportImage={handleExportImage}
             onExportPdf={handleExportPdf}
+            onPrintQuotation={handlePrintQuotation}
+            onOpenGalleryGuide={handleOpenGalleryGuide}
+            onOpenDesignSettings={() => {
+              setSettingsInitialTab('design');
+              setActiveView('settings');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
+        {activeView === 'finance' && (
+          <FinanceSubmissionView
+            settings={settings}
+            quoteSessions={quoteSessions}
+            activeQuoteId={activeSession.id}
+            attachmentsByQuoteId={financeAttachmentsByQuoteId}
+            onSelectQuoteSession={(sessionId) => setActiveQuoteId(sessionId)}
+            onUpdateQuoteState={handleUpdateSessionStateById}
+            onAddAttachments={handleAddFinanceAttachments}
+            onReplaceAttachment={handleReplaceFinanceAttachment}
+            onRemoveAttachment={handleRemoveFinanceAttachment}
+            onClearAttachments={handleClearFinanceAttachments}
+            onJumpToCalculatorStep={(sessionId, step) => {
+              setActiveQuoteId(sessionId);
+              handleEditQuoteSession(sessionId, step);
+            }}
+            onNotify={showToast}
           />
         )}
 
@@ -654,6 +901,8 @@ export default function App() {
             settings={settings}
             theme={theme}
             lastSavedAt={lastSavedAt}
+            initialTab={settingsInitialTab}
+            previewState={activeSession.state}
             onChangeTheme={(nextTheme) => {
               setTheme(nextTheme);
               try {
@@ -686,17 +935,127 @@ export default function App() {
             settings={settings}
             state={activeSession.state}
             calc={calc}
-            quoteNumber={activeSession.quoteNumber}
           />
         </div>
       </div>
+
+      {/* Mobile Gallery Save & Permission Guide Modal */}
+      {galleryModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="no-print fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+        >
+          <div className="w-full sm:max-w-lg max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl">
+            <div className="h-1 gold-copper-bar" />
+            <div className="p-4 sm:p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className={`w-9 h-9 rounded-xl inline-flex items-center justify-center shrink-0 ${
+                      galleryModal.permissionDenied
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                    }`}
+                  >
+                    {galleryModal.permissionDenied ? (
+                      <AlertCircle className="w-5 h-5" />
+                    ) : (
+                      <ImageIcon className="w-5 h-5" />
+                    )}
+                  </span>
+                  <div>
+                    <h2 className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white">
+                      {galleryModal.permissionDenied
+                        ? 'ระบบถูกปฏิเสธสิทธิ์บันทึกรูปภาพ'
+                        : 'บันทึกรูปภาพลงแกลเลอรี (iPhone / Android)'}
+                    </h2>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      ชื่อไฟล์: <span className="font-mono-num">{galleryModal.filename}</span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setGalleryModal(null)}
+                  className="min-w-[40px] min-h-[40px] rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 inline-flex items-center justify-center cursor-pointer"
+                  aria-label="ปิดหน้าต่าง"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {galleryModal.dataUrl && (
+                <div className="space-y-2.5">
+                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                    <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300 mb-2 text-center">
+                      กดค้างที่รูปภาพด้านล่าง แล้วเลือก &quot;บันทึกรูปภาพ&quot; / &quot;Add to Photos&quot;
+                    </div>
+                    <img
+                      src={galleryModal.dataUrl}
+                      alt={galleryModal.filename}
+                      className="w-full max-h-64 object-contain rounded-lg mx-auto bg-white"
+                    />
+                  </div>
+                  <a
+                    href={galleryModal.dataUrl}
+                    download={galleryModal.filename}
+                    className="btn-gold-copper w-full min-h-[46px] px-4 py-2.5 text-xs sm:text-sm font-extrabold rounded-xl inline-flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    ดาวน์โหลดไฟล์รูปภาพ ({galleryModal.filename.split('.').pop()?.toUpperCase()})
+                  </a>
+                </div>
+              )}
+
+              {/* Permission Guide for iPhone & Android */}
+              <div className="space-y-2.5 text-xs">
+                <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  วิธีอนุญาตสิทธิ์เข้าถึงรูปภาพ / ดาวน์โหลด หากบันทึกไม่ได้
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1">
+                  <div className="font-bold text-slate-900 dark:text-white">
+                    สำหรับ iPhone / iPad (iOS)
+                  </div>
+                  <ol className="list-decimal pl-4 space-y-0.5 text-slate-600 dark:text-slate-300">
+                    <li>เปิดแอป <strong>การตั้งค่า (Settings)</strong> → <strong>แอป (Apps)</strong> → <strong>Safari</strong> (หรือ LINE / Chrome ที่ใช้อยู่)</li>
+                    <li>แตะ <strong>รูปภาพ (Photos)</strong> แล้วเลือกอนุญาต <strong>เพิ่มรูปภาพเท่านั้น (Add Photos Only)</strong> หรือ <strong>ทั้งหมด</strong></li>
+                    <li>หากกดปุ่มแชร์แล้ว ให้เลื่อนลงแล้วแตะ <strong>&quot;บันทึกรูปภาพ&quot; (Save Image)</strong> เพื่อลงแอป Photos ทันที</li>
+                  </ol>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-1">
+                  <div className="font-bold text-slate-900 dark:text-white">
+                    สำหรับ Android (Chrome / LINE)
+                  </div>
+                  <ol className="list-decimal pl-4 space-y-0.5 text-slate-600 dark:text-slate-300">
+                    <li>เปิด <strong>การตั้งค่า (Settings)</strong> → <strong>แอป (Apps)</strong> → เลือก <strong>Chrome</strong> หรือเบราว์เซอร์ที่ใช้งาน</li>
+                    <li>แตะ <strong>การอนุญาต (Permissions)</strong> → <strong>รูปภาพและวิดีโอ (Photos and videos)</strong> → เลือก <strong>อนุญาต (Allow)</strong></li>
+                    <li>ไฟล์รูปที่ดาวน์โหลดจะอยู่ในโฟลเดอร์ <strong>Downloads / Gallery</strong> ของเครื่องทันที</li>
+                  </ol>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setGalleryModal(null)}
+                className="w-full min-h-[44px] px-4 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 rounded-xl cursor-pointer"
+              >
+                ปิดหน้าต่างนี้
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clean Toast Notification */}
       {toastMessage && (
         <div
           role="status"
           aria-live="polite"
-          className="no-print fixed bottom-5 right-5 z-50 card-midnight-hero text-white text-xs sm:text-sm font-medium px-4 py-3 rounded-xl border border-amber-400/40"
+          className="no-print fixed bottom-4 left-3 right-3 sm:left-auto sm:right-5 sm:bottom-5 z-50 card-midnight-hero text-white text-xs sm:text-sm font-medium px-4 py-3 rounded-xl border border-amber-400/40 shadow-xl"
         >
           {toastMessage}
         </div>

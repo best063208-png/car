@@ -12,6 +12,37 @@ export type VatMode =
 
 export type WizardStep = 1 | 2 | 3 | 4 | 5 | 'preview';
 
+export type QuotationFontFamily =
+  | 'Noto Sans Thai'
+  | 'Prompt'
+  | 'Sarabun'
+  | 'Kanit'
+  | 'IBM Plex Sans Thai';
+
+export type LogoPosition = 'left' | 'center' | 'right';
+
+export interface QuotationDesignConfig {
+  presetId: string;
+  primaryColor: string;
+  headerBgColor: string;
+  headerTextColor: string;
+  backgroundColor: string;
+  textColor: string;
+  tableHeaderBgColor: string;
+  tableHeaderTextColor: string;
+  sectionTitleColor: string;
+  fontFamily: QuotationFontFamily;
+  fontSizePx: number;
+  logoPosition: LogoPosition;
+}
+
+export interface SavedQuotationTheme {
+  id: string;
+  name: string;
+  createdAt: string;
+  design: QuotationDesignConfig;
+}
+
 export interface BenefitCategories {
   insuranceAndAct: string;
   homeCharger: string;
@@ -21,6 +52,8 @@ export interface BenefitCategories {
   roadsideAssistance: string;
   extraItems: string[];
 }
+
+export type BenefitSelectionKey = Exclude<keyof BenefitCategories, 'extraItems'>;
 
 export interface VehicleTrim {
   id: string;
@@ -56,7 +89,6 @@ export interface ShowroomInfo {
   salesName: string;
   salesPhone: string;
   logoUrl: string;
-  quoteValidityDays: number;
 }
 
 export interface FreebieItem {
@@ -76,6 +108,8 @@ export interface DealerSettings {
   deliveryDefaults: DeliveryExpenseDefaults;
   freebiePresets: FreebieItem[];
   defaultAnonymousMode?: boolean;
+  quotationDesign: QuotationDesignConfig;
+  savedDesigns: SavedQuotationTheme[];
 }
 
 export interface CustomDeliveryItem {
@@ -106,16 +140,34 @@ export interface QuoteState {
   customFreebieNote: string;
   promotionNote: string;
   benefitsOverride: BenefitCategories | null;
+  selectedBenefitKeys?: BenefitSelectionKey[];
+  disabledExtraBenefitIndices?: number[];
   customerName: string;
   customerPhone: string;
   bookingDetails: string;
   quoteNote: string;
   anonymousMode?: boolean;
+  enableSpecialInterestDiscount?: boolean;
+  specialInterestLabel?: string;
+  specialInterestDiscountMode?: 'discount_rate' | 'target_rate';
+  specialInterestDiscountRate?: number;
+  specialInterestTargetRate?: number | null;
+  customFirstInstallmentAmount?: number | null;
+  vehicleColor?: string;
+  financeNote?: string;
+}
+
+export interface FinanceAttachment {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  file: File;
+  previewUrl: string;
 }
 
 export interface QuoteSession {
   id: string;
-  quoteNumber: string;
   createdAt: string;
   updatedAt: string;
   currentStep: WizardStep;
@@ -126,6 +178,7 @@ export interface QuoteSession {
 export interface CalculatedQuote {
   trim: VehicleTrim;
   activeBenefits: BenefitCategories;
+  enabledBenefitTexts: string[];
   isCashPurchase: boolean;
   normalPrice: number;
   baseSpecialPrice: number;
@@ -148,6 +201,11 @@ export interface CalculatedQuote {
   tierMatched: DownPercentTier | null;
   tableRate: number | null;
   isRateUnavailable: boolean;
+  baseInterestRate: number;
+  specialDiscountActive: boolean;
+  specialDiscountLabel: string;
+  specialInterestDiscountApplied: number;
+  rateAfterSpecialDiscount: number;
   earlyPaymentDiscountApplied: number;
   effectiveInterestRate: number;
   totalInterest: number;

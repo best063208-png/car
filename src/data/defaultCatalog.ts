@@ -1,10 +1,22 @@
 import {
+  BenefitSelectionKey,
   DealerSettings,
   DownPercentTier,
+  QuotationDesignConfig,
+  QuotationFontFamily,
   QuoteSession,
   QuoteState,
   TenorMonths,
 } from '../types/dealer';
+
+export const ALL_BENEFIT_KEYS: BenefitSelectionKey[] = [
+  'insuranceAndAct',
+  'homeCharger',
+  'vehicleWarranty',
+  'batteryWarranty',
+  'lifetimeBatteryWarranty',
+  'roadsideAssistance',
+];
 
 export const JIN_MOTOR_LOGO_PATH =
   '/assets/aistudio/902979375_1773518383723265_6688874981857316286_n_2ad35ffc.jpg';
@@ -19,6 +31,137 @@ export const TENOR_OPTIONS: { months: TenorMonths; years: number; label: string 
 
 export const DOWN_PERCENT_TIERS: DownPercentTier[] = [30, 25, 20, 15, 10, 5];
 
+export const QUOTATION_FONT_OPTIONS: {
+  id: QuotationFontFamily;
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'Noto Sans Thai',
+    label: 'Noto Sans Thai',
+    desc: 'มาตรฐานสากล อ่านง่าย คมชัด',
+  },
+  {
+    id: 'Prompt',
+    label: 'Prompt (พร้อมท์)',
+    desc: 'ทันสมัย สมดุล เหมาะกับโชว์รูมรถไฟฟ้า',
+  },
+  {
+    id: 'Sarabun',
+    label: 'Sarabun (สารบรรณ)',
+    desc: 'ทางการ เรียบร้อย สไตล์เอกสารบริษัท',
+  },
+  {
+    id: 'Kanit',
+    label: 'Kanit (คณิต)',
+    desc: 'โมเดิร์น เด่นชัด อ่านง่ายบนมือถือ',
+  },
+  {
+    id: 'IBM Plex Sans Thai',
+    label: 'IBM Plex Sans Thai',
+    desc: 'เรียบหรู เทคโนโลยี ตัวเลขคมชัด',
+  },
+];
+
+export const DEFAULT_QUOTATION_DESIGN: QuotationDesignConfig = {
+  presetId: 'midnight-gold',
+  primaryColor: '#d97706',
+  headerBgColor: '#ffffff',
+  headerTextColor: '#0f172a',
+  backgroundColor: '#ffffff',
+  textColor: '#0f172a',
+  tableHeaderBgColor: '#0c1733',
+  tableHeaderTextColor: '#ffffff',
+  sectionTitleColor: '#0f172a',
+  fontFamily: 'Noto Sans Thai',
+  fontSizePx: 14,
+  logoPosition: 'left',
+};
+
+export const QUOTATION_DESIGN_PRESETS: {
+  id: string;
+  name: string;
+  design: QuotationDesignConfig;
+}[] = [
+  {
+    id: 'midnight-gold',
+    name: 'Midnight Gold (มาตรฐาน)',
+    design: DEFAULT_QUOTATION_DESIGN,
+  },
+  {
+    id: 'deepal-ocean',
+    name: 'DEEPAL Electric Blue',
+    design: {
+      presetId: 'deepal-ocean',
+      primaryColor: '#0284c7',
+      headerBgColor: '#0f172a',
+      headerTextColor: '#f8fafc',
+      backgroundColor: '#ffffff',
+      textColor: '#0f172a',
+      tableHeaderBgColor: '#0369a1',
+      tableHeaderTextColor: '#ffffff',
+      sectionTitleColor: '#0c4a6e',
+      fontFamily: 'Prompt',
+      fontSizePx: 14,
+      logoPosition: 'left',
+    },
+  },
+  {
+    id: 'emerald-ev',
+    name: 'Emerald EV Eco',
+    design: {
+      presetId: 'emerald-ev',
+      primaryColor: '#059669',
+      headerBgColor: '#ecfdf5',
+      headerTextColor: '#064e3b',
+      backgroundColor: '#ffffff',
+      textColor: '#1e293b',
+      tableHeaderBgColor: '#064e3b',
+      tableHeaderTextColor: '#ecfdf5',
+      sectionTitleColor: '#065f46',
+      fontFamily: 'IBM Plex Sans Thai',
+      fontSizePx: 14,
+      logoPosition: 'left',
+    },
+  },
+  {
+    id: 'executive-ivory',
+    name: 'Executive Burgundy',
+    design: {
+      presetId: 'executive-ivory',
+      primaryColor: '#b45309',
+      headerBgColor: '#fafaf9',
+      headerTextColor: '#1c1917',
+      backgroundColor: '#fffdf9',
+      textColor: '#1c1917',
+      tableHeaderBgColor: '#292524',
+      tableHeaderTextColor: '#fef3c7',
+      sectionTitleColor: '#78350f',
+      fontFamily: 'Sarabun',
+      fontSizePx: 14,
+      logoPosition: 'center',
+    },
+  },
+  {
+    id: 'minimal-slate',
+    name: 'Minimalist Slate',
+    design: {
+      presetId: 'minimal-slate',
+      primaryColor: '#334155',
+      headerBgColor: '#f8fafc',
+      headerTextColor: '#0f172a',
+      backgroundColor: '#ffffff',
+      textColor: '#1e293b',
+      tableHeaderBgColor: '#1e293b',
+      tableHeaderTextColor: '#f8fafc',
+      sectionTitleColor: '#0f172a',
+      fontFamily: 'Kanit',
+      fontSizePx: 14,
+      logoPosition: 'right',
+    },
+  },
+];
+
 export const DEFAULT_SETTINGS: DealerSettings = {
   showroom: {
     showroomName: 'JIN MOTOR',
@@ -29,7 +172,6 @@ export const DEFAULT_SETTINGS: DealerSettings = {
     salesName: 'ที่ปรึกษาการขาย JIN MOTOR',
     salesPhone: '08X-XXX-XXXX',
     logoUrl: JIN_MOTOR_LOGO_PATH,
-    quoteValidityDays: 15,
   },
   earlyPaymentDiscount: 0.10,
   deliveryDefaults: {
@@ -38,6 +180,8 @@ export const DEFAULT_SETTINGS: DealerSettings = {
     bookingDeposit: 4000,
   },
   defaultAnonymousMode: false,
+  quotationDesign: DEFAULT_QUOTATION_DESIGN,
+  savedDesigns: [],
   freebiePresets: [
     { id: 'film', label: 'ฟิล์มกรองแสงเซรามิกรอบคัน + บานหน้า', defaultChecked: true },
     { id: 'mat', label: 'พรมปูพื้นเข้ารูปเต็มคัน', defaultChecked: true },
@@ -399,27 +543,28 @@ export function createInitialQuoteState(settings: DealerSettings): QuoteState {
     customFreebieNote: '',
     promotionNote: '',
     benefitsOverride: null,
+    selectedBenefitKeys: [...ALL_BENEFIT_KEYS],
+    disabledExtraBenefitIndices: [],
     customerName: '',
     customerPhone: '',
     bookingDetails: '',
     quoteNote: '',
     anonymousMode: Boolean(settings.defaultAnonymousMode),
+    enableSpecialInterestDiscount: false,
+    specialInterestLabel: '',
+    specialInterestDiscountMode: 'discount_rate',
+    specialInterestDiscountRate: 0,
+    specialInterestTargetRate: null,
+    customFirstInstallmentAmount: null,
+    vehicleColor: '',
+    financeNote: '',
   };
 }
 
-export function createQuoteSession(
-  settings: DealerSettings,
-  sequenceNumber = 1
-): QuoteSession {
+export function createQuoteSession(settings: DealerSettings): QuoteSession {
   const now = new Date();
-  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
-    2,
-    '0'
-  )}${String(now.getDate()).padStart(2, '0')}`;
-  const seqPart = String(sequenceNumber).padStart(2, '0');
   return {
     id: `quote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    quoteNumber: `QT-${datePart}-${seqPart}`,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     currentStep: 1,

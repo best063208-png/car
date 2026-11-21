@@ -6,8 +6,10 @@ import {
   Save,
   Trash2,
 } from 'lucide-react';
+import { ALL_BENEFIT_KEYS } from '../data/defaultCatalog';
 import {
   BenefitCategories,
+  BenefitSelectionKey,
   CalculatedQuote,
   DealerSettings,
   QuoteState,
@@ -64,8 +66,53 @@ export const BenefitsView: React.FC<BenefitsViewProps> = ({
     });
   };
 
+  const selectedBenefitKeys = state.selectedBenefitKeys ?? ALL_BENEFIT_KEYS;
+  const disabledExtraIndices = state.disabledExtraBenefitIndices ?? [];
+
+  const toggleBenefitKey = (key: BenefitSelectionKey) => {
+    onUpdateState((prev) => {
+      const current = prev.selectedBenefitKeys ?? ALL_BENEFIT_KEYS;
+      const exists = current.includes(key);
+      return {
+        ...prev,
+        selectedBenefitKeys: exists
+          ? current.filter((k) => k !== key)
+          : [...current, key],
+      };
+    });
+  };
+
+  const toggleExtraBenefit = (idx: number) => {
+    onUpdateState((prev) => {
+      const current = prev.disabledExtraBenefitIndices ?? [];
+      const isDisabled = current.includes(idx);
+      return {
+        ...prev,
+        disabledExtraBenefitIndices: isDisabled
+          ? current.filter((i) => i !== idx)
+          : [...current, idx],
+      };
+    });
+  };
+
+  const selectAllBenefits = () => {
+    onUpdateState((prev) => ({
+      ...prev,
+      selectedBenefitKeys: [...ALL_BENEFIT_KEYS],
+      disabledExtraBenefitIndices: [],
+    }));
+  };
+
+  const clearAllBenefits = () => {
+    onUpdateState((prev) => ({
+      ...prev,
+      selectedBenefitKeys: [],
+      disabledExtraBenefitIndices: activeBenefits.extraItems.map((_, i) => i),
+    }));
+  };
+
   const benefitFields: {
-    key: Exclude<keyof BenefitCategories, 'extraItems'>;
+    key: BenefitSelectionKey;
     label: string;
   }[] = [
     { key: 'insuranceAndAct', label: 'ประกันภัยชั้น 1 และ พ.ร.บ.' },
@@ -131,6 +178,20 @@ export const BenefitsView: React.FC<BenefitsViewProps> = ({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={selectAllBenefits}
+              className="px-3 py-1.5 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl cursor-pointer"
+            >
+              เลือกทั้งหมด
+            </button>
+            <button
+              type="button"
+              onClick={clearAllBenefits}
+              className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl cursor-pointer"
+            >
+              ไม่เลือกเลย
+            </button>
             {state.benefitsOverride && (
               <button
                 type="button"
@@ -155,26 +216,55 @@ export const BenefitsView: React.FC<BenefitsViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {benefitFields.map((field) => (
-            <div key={field.key}>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                {field.label}
-              </label>
-              <input
-                type="text"
-                value={activeBenefits[field.key]}
-                onChange={(e) => updateBenefitField(field.key, e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-              />
-            </div>
-          ))}
+          {benefitFields.map((field) => {
+            const isChecked = selectedBenefitKeys.includes(field.key);
+            return (
+              <div
+                key={field.key}
+                className={`p-3.5 rounded-xl border transition-all ${
+                  isChecked
+                    ? 'bg-amber-50/40 dark:bg-slate-900/90 border-amber-300/80 dark:border-amber-400/40'
+                    : 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-65'
+                }`}
+              >
+                <label className="flex items-center justify-between gap-2 mb-2 cursor-pointer select-none">
+                  <span className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleBenefitKey(field.key)}
+                      className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {field.label}
+                    </span>
+                  </span>
+                  <span
+                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                      isChecked
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    {isChecked ? 'แสดงในใบเสนอราคา' : 'ไม่รวม'}
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={activeBenefits[field.key]}
+                  onChange={(e) => updateBenefitField(field.key, e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+              </div>
+            );
+          })}
         </div>
 
         {/* Extra Benefit Items */}
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
           <div className="flex items-center justify-between">
             <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              สิทธิประโยชน์พิเศษเพิ่มเติม
+              สิทธิประโยชน์พิเศษเพิ่มเติม (ติ๊กเลือกเพื่อรวมในใบเสนอราคา)
             </label>
             <button
               type="button"
@@ -197,34 +287,62 @@ export const BenefitsView: React.FC<BenefitsViewProps> = ({
                 ยังไม่มีรายการเพิ่มเติม กดปุ่ม &quot;เพิ่มสิทธิประโยชน์&quot; เพื่อเพิ่มรายการ
               </p>
             )}
-            {activeBenefits.extraItems.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={item}
-                  placeholder={`สิทธิประโยชน์เพิ่มเติมข้อที่ ${idx + 1}`}
-                  onChange={(e) => {
-                    const next = [...activeBenefits.extraItems];
-                    next[idx] = e.target.value;
-                    updateBenefitField('extraItems', next);
-                  }}
-                  className="flex-1 px-3.5 py-2 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = activeBenefits.extraItems.filter(
-                      (_, i) => i !== idx
-                    );
-                    updateBenefitField('extraItems', next);
-                  }}
-                  className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                  aria-label="ลบรายการ"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+            {activeBenefits.extraItems.map((item, idx) => {
+              const isChecked = !disabledExtraIndices.includes(idx);
+              return (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleExtraBenefit(idx)}
+                    aria-label={`เลือกสิทธิประโยชน์พิเศษข้อที่ ${idx + 1}`}
+                    className="w-4 h-4 rounded accent-amber-500 shrink-0 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={item}
+                    placeholder={`สิทธิประโยชน์เพิ่มเติมข้อที่ ${idx + 1}`}
+                    onChange={(e) => {
+                      const next = [...activeBenefits.extraItems];
+                      next[idx] = e.target.value;
+                      updateBenefitField('extraItems', next);
+                    }}
+                    className={`flex-1 px-3.5 py-2 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                      !isChecked ? 'opacity-60' : ''
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateState((prev) => {
+                        const currentBenefits =
+                          prev.benefitsOverride ?? trim.benefits;
+                        const nextExtras = currentBenefits.extraItems.filter(
+                          (_, i) => i !== idx
+                        );
+                        const nextDisabled = (
+                          prev.disabledExtraBenefitIndices ?? []
+                        )
+                          .filter((i) => i !== idx)
+                          .map((i) => (i > idx ? i - 1 : i));
+                        return {
+                          ...prev,
+                          benefitsOverride: {
+                            ...currentBenefits,
+                            extraItems: nextExtras,
+                          },
+                          disabledExtraBenefitIndices: nextDisabled,
+                        };
+                      });
+                    }}
+                    className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                    aria-label="ลบรายการ"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

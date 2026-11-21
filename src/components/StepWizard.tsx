@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Copy,
   Edit3,
   Eye,
   EyeOff,
@@ -13,11 +14,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  ALL_BENEFIT_KEYS,
   DOWN_PERCENT_TIERS,
   TENOR_OPTIONS,
 } from '../data/defaultCatalog';
 import {
   BenefitCategories,
+  BenefitSelectionKey,
   BrandId,
   CalculatedQuote,
   CustomDeliveryItem,
@@ -43,11 +46,22 @@ interface StepWizardProps {
   onChangeStep: (step: WizardStep) => void;
   onSaveBenefitsToModel: (trimId: string, benefits: BenefitCategories) => void;
   onOpenBenefitsPage: () => void;
+  onCopyLineText?: () => void;
 }
 
 const DISCOUNT_PRESETS = [0, 20000, 30000, 50000, 100000];
 const SUBSIDY_PRESETS = [0, 20000, 30000, 50000, 80000, 100000];
+const INTEREST_RATE_PRESETS = [1.99, 2.49, 2.99, 3.5];
 const BOOKING_PRESETS = [0, 4000, 5000, 10000];
+
+const CORE_BENEFIT_FIELDS: { key: BenefitSelectionKey; label: string }[] = [
+  { key: 'insuranceAndAct', label: 'ประกันภัยและการคุ้มครอง' },
+  { key: 'homeCharger', label: 'อุปกรณ์ชาร์จ (Home Charger)' },
+  { key: 'vehicleWarranty', label: 'การรับประกันรถยนต์' },
+  { key: 'batteryWarranty', label: 'การรับประกันแบตเตอรี่' },
+  { key: 'lifetimeBatteryWarranty', label: 'Lifetime Battery Warranty' },
+  { key: 'roadsideAssistance', label: 'บริการช่วยเหลือฉุกเฉินและบริการอื่น ๆ' },
+];
 
 const CARD_SURFACE = 'card-premium rounded-2xl';
 
@@ -81,17 +95,51 @@ export const StepWizard: React.FC<StepWizardProps> = ({
   onChangeStep,
   onSaveBenefitsToModel,
   onOpenBenefitsPage,
+  onCopyLineText,
 }) => {
   const { state } = session;
   const currentStep = session.currentStep === 'preview' ? 1 : session.currentStep;
   const [brandFilter, setBrandFilter] = useState<'ALL' | BrandId>('ALL');
+  const [modelFilter, setModelFilter] = useState<string>('ALL');
+  const [autoAdvanceOnSelect, setAutoAdvanceOnSelect] = useState<boolean>(true);
+  const [rateDraft, setRateDraft] = useState<string | null>(null);
+  const [specialDiscountDraft, setSpecialDiscountDraft] = useState<string | null>(
+    null
+  );
+  const [specialAfterRateDraft, setSpecialAfterRateDraft] = useState<
+    string | null
+  >(null);
+  const [firstInstallmentDraft, setFirstInstallmentDraft] = useState<
+    string | null
+  >(null);
 
-  const activeTrims = useMemo(
+  const brandFilteredTrims = useMemo(
     () =>
       settings.trims.filter(
         (t) => t.active && (brandFilter === 'ALL' || t.brand === brandFilter)
       ),
     [settings.trims, brandFilter]
+  );
+
+  const availableModels = useMemo(() => {
+    const map = new Map<string, string>();
+    brandFilteredTrims.forEach((trim) => {
+      if (!map.has(trim.modelId)) {
+        map.set(trim.modelId, trim.modelName);
+      }
+    });
+    return Array.from(map.entries()).map(([modelId, modelName]) => ({
+      modelId,
+      modelName,
+    }));
+  }, [brandFilteredTrims]);
+
+  const activeTrims = useMemo(
+    () =>
+      brandFilteredTrims.filter(
+        (t) => modelFilter === 'ALL' || t.modelId === modelFilter
+      ),
+    [brandFilteredTrims, modelFilter]
   );
 
   const modelGroups = useMemo(() => {
@@ -131,6 +179,53 @@ export const StepWizard: React.FC<StepWizardProps> = ({
         ...(prev.benefitsOverride ?? calc.trim.benefits),
         [key]: value,
       },
+    }));
+  };
+
+  const selectedBenefitKeys = state.selectedBenefitKeys ?? ALL_BENEFIT_KEYS;
+  const disabledExtraIndices = state.disabledExtraBenefitIndices ?? [];
+
+  const toggleBenefitKey = (key: BenefitSelectionKey) => {
+    onUpdateState((prev) => {
+      const current = prev.selectedBenefitKeys ?? ALL_BENEFIT_KEYS;
+      const exists = current.includes(key);
+      return {
+        ...prev,
+        selectedBenefitKeys: exists
+          ? current.filter((k) => k !== key)
+          : [...current, key],
+      };
+    });
+  };
+
+  const toggleExtraBenefit = (idx: number) => {
+    onUpdateState((prev) => {
+      const current = prev.disabledExtraBenefitIndices ?? [];
+      const isDisabled = current.includes(idx);
+      return {
+        ...prev,
+        disabledExtraBenefitIndices: isDisabled
+          ? current.filter((i) => i !== idx)
+          : [...current, idx],
+      };
+    });
+  };
+
+  const selectAllBenefits = () => {
+    onUpdateState((prev) => ({
+      ...prev,
+      selectedBenefitKeys: [...ALL_BENEFIT_KEYS],
+      disabledExtraBenefitIndices: [],
+    }));
+  };
+
+  const clearAllBenefits = () => {
+    onUpdateState((prev) => ({
+      ...prev,
+      selectedBenefitKeys: [],
+      disabledExtraBenefitIndices: calc.activeBenefits.extraItems.map(
+        (_, i) => i
+      ),
     }));
   };
 
@@ -190,11 +285,89 @@ export const StepWizard: React.FC<StepWizardProps> = ({
     }
   };
 
+  const progressPercent = Math.round((currentStep / 5) * 100);
+
   return (
-    <div className="space-y-6">
-      {/* 5-Step Progress Navigation Bar */}
-      <div className={`${CARD_SURFACE} p-3 sm:p-4`}>
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+    <div className="space-y-4 sm:space-y-6">
+      {/* 5-Step Progress Navigation Bar (Mobile-First + Desktop) */}
+      <div className={`${CARD_SURFACE} p-3 sm:p-4 space-y-3`}>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="font-extrabold text-slate-900 dark:text-white">
+            ขั้นตอนที่ {currentStep} จาก 5 ·{' '}
+            <span className="text-amber-700 dark:text-amber-400">
+              {WIZARD_STEPS[currentStep - 1]?.shortTitle}
+            </span>
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono-num font-bold text-slate-500 dark:text-slate-400">
+              {progressPercent}%
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangeStep('preview')}
+              className="sm:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-amber-400/50 bg-amber-50/80 dark:bg-amber-500/15 text-amber-900 dark:text-amber-300 text-[11px] font-bold cursor-pointer"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              ดูใบเสนอราคา
+            </button>
+          </div>
+        </div>
+
+        {/* Continuous Progress Bar */}
+        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+          <div
+            className="h-full gold-copper-bar rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+
+        {/* Mobile 5-column zero-scroll step selector */}
+        <div className="grid grid-cols-5 gap-1.5 sm:hidden">
+          {WIZARD_STEPS.map((item) => {
+            const isActive = currentStep === item.step;
+            const isPassed = currentStep > item.step || session.hasVisitedPreview;
+            return (
+              <button
+                key={item.step}
+                type="button"
+                onClick={() => onChangeStep(item.step)}
+                className={`min-h-[48px] px-1 py-1.5 rounded-xl border flex flex-col items-center justify-center gap-0.5 text-center transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-gradient-to-b from-[#070d1f] to-[#162652] text-white border-amber-400/70 shadow-sm'
+                    : isPassed
+                    ? 'bg-emerald-50/80 dark:bg-emerald-950/30 text-slate-800 dark:text-slate-200 border-emerald-200 dark:border-emerald-800/70'
+                    : 'bg-slate-50 dark:bg-slate-900/70 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                <span
+                  className={`w-5 h-5 rounded-md text-[11px] font-extrabold inline-flex items-center justify-center ${
+                    isActive
+                      ? 'btn-gold-copper text-slate-950'
+                      : isPassed
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {isPassed && !isActive ? (
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  ) : (
+                    item.step
+                  )}
+                </span>
+                <span
+                  className={`text-[10px] font-bold leading-tight truncate max-w-full ${
+                    isActive ? 'text-amber-300' : ''
+                  }`}
+                >
+                  {item.shortTitle}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Desktop 5-step pill row */}
+        <div className="hidden sm:flex items-center gap-2 overflow-x-auto pb-0.5">
           {WIZARD_STEPS.map((item) => {
             const isActive = currentStep === item.step;
             const isPassed = currentStep > item.step || session.hasVisitedPreview;
@@ -255,13 +428,33 @@ export const StepWizard: React.FC<StepWizardProps> = ({
         </div>
       </div>
 
+      {/* Mobile Compact Live Summary Strip */}
+      <div className="lg:hidden card-midnight-hero text-white rounded-2xl px-4 py-3 border border-amber-400/30 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] text-amber-300 font-bold truncate">
+            {calc.trim.modelName} · {calc.trim.trimName}
+          </div>
+          <div className="text-xs text-slate-300 font-mono-num mt-0.5">
+            {calc.isCashPurchase
+              ? `ซื้อเงินสด · สุทธิ ${formatTHB(calc.netCarPrice)} ฿`
+              : `${formatTHB(calc.monthlyInstallment)} ฿/ด. · ${calc.tenorMonths} งวด`}
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="text-[10px] text-slate-300">วันรับรถสุทธิ</div>
+          <div className="text-sm font-extrabold font-mono-num text-emerald-400">
+            {formatTHB(calc.totalDeliveryCashDue)} ฿
+          </div>
+        </div>
+      </div>
+
       {/* Main 2-Column Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 lg:gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-start">
         {/* Left: Active Step Form */}
-        <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+        <div className="lg:col-span-7 xl:col-span-8 space-y-5 sm:space-y-6">
           {/* STEP 1: Vehicle Selection */}
           {currentStep === 1 && (
-            <section className={`${CARD_SURFACE} p-5 sm:p-7 space-y-6`}>
+            <section className={`${CARD_SURFACE} p-4 sm:p-7 space-y-5`}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
                 <div>
                   <div className="text-xs font-bold text-amber-700 dark:text-amber-400">
@@ -271,23 +464,74 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                     เลือกรุ่นรถยนต์ และรุ่นย่อย
                   </h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    เลือกยี่ห้อ รุ่นรถยนต์ และรุ่นย่อยที่ต้องการนำเสนอให้ลูกค้า
+                    แตะเลือกรุ่นย่อยที่ต้องการ ระบบจะพาไปยังขั้นตอนที่ 2 อัตโนมัติ
                   </p>
                 </div>
 
-                <div className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-900 border border-transparent dark:border-slate-800 rounded-xl self-start">
-                  {(['ALL', 'DEEPAL', 'CHANGAN'] as const).map((brand) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center p-1 bg-slate-100 dark:bg-slate-900 border border-transparent dark:border-slate-800 rounded-xl">
+                    {(['ALL', 'DEEPAL', 'CHANGAN'] as const).map((brand) => (
+                      <button
+                        key={brand}
+                        type="button"
+                        onClick={() => {
+                          setBrandFilter(brand);
+                          setModelFilter('ALL');
+                        }}
+                        className={`min-h-[38px] px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                          brandFilter === brand
+                            ? 'bg-gradient-to-r from-slate-950 to-slate-800 dark:from-[#162652] dark:to-[#1e336b] text-amber-400 dark:text-amber-300 border border-transparent dark:border-amber-400/40 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                        }`}
+                      >
+                        {brand === 'ALL' ? 'ทุกยี่ห้อ' : brand}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Model Quick-Filter Pills + Auto-Advance Switch */}
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    เลือกรุ่นรถ (กรองด่วน)
+                  </span>
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoAdvanceOnSelect}
+                      onChange={(e) => setAutoAdvanceOnSelect(e.target.checked)}
+                      className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                    />
+                    แตะรุ่นย่อยแล้วไปขั้นตอนถัดไปอัตโนมัติ
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setModelFilter('ALL')}
+                    className={`min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
+                      modelFilter === 'ALL'
+                        ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60'
+                        : 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400'
+                    }`}
+                  >
+                    ทุกรุ่น
+                  </button>
+                  {availableModels.map((m) => (
                     <button
-                      key={brand}
+                      key={m.modelId}
                       type="button"
-                      onClick={() => setBrandFilter(brand)}
-                      className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-                        brandFilter === brand
-                          ? 'bg-gradient-to-r from-slate-950 to-slate-800 dark:from-[#162652] dark:to-[#1e336b] text-amber-400 dark:text-amber-300 border border-transparent dark:border-amber-400/40 shadow-sm'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                      onClick={() => setModelFilter(m.modelId)}
+                      className={`min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
+                        modelFilter === m.modelId
+                          ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60'
+                          : 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400'
                       }`}
                     >
-                      {brand === 'ALL' ? 'ทุกยี่ห้อ' : brand}
+                      {m.modelName}
                     </button>
                   ))}
                 </div>
@@ -326,8 +570,13 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                             <button
                               key={trim.id}
                               type="button"
-                              onClick={() => onSelectTrim(trim)}
-                              className={`w-full text-left px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer ${
+                              onClick={() => {
+                                onSelectTrim(trim);
+                                if (autoAdvanceOnSelect) {
+                                  onChangeStep(2);
+                                }
+                              }}
+                              className={`w-full min-h-[52px] text-left px-3.5 py-3 rounded-xl border transition-all cursor-pointer ${
                                 isSelected
                                   ? 'bg-gradient-to-r from-[#070d1f] via-[#0d1a3a] to-[#162652] text-white border-amber-400/60 shadow-md'
                                   : 'bg-white dark:bg-slate-900/90 text-slate-800 dark:text-slate-100 border-slate-200 dark:border-slate-700 hover:border-amber-400 hover:bg-amber-50/40 dark:hover:bg-slate-800'
@@ -848,12 +1097,13 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                       {state.customInterestRate !== null && (
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setRateDraft(null);
                             onUpdateState((p) => ({
                               ...p,
                               customInterestRate: null,
-                            }))
-                          }
+                            }));
+                          }}
                           className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
                         >
                           <RotateCcw className="w-3 h-3" />
@@ -863,28 +1113,108 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                     </div>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min={0}
-                      max={15}
+                      max={25}
                       step={0.01}
                       value={
-                        state.customInterestRate !== null
-                          ? state.customInterestRate
-                          : calc.tableRate ?? ''
+                        rateDraft !== null
+                          ? rateDraft
+                          : state.customInterestRate !== null
+                          ? String(state.customInterestRate)
+                          : calc.tableRate !== null
+                          ? String(calc.tableRate)
+                          : ''
                       }
-                      placeholder={calc.isRateUnavailable ? 'ระบุอัตราดอกเบี้ย' : ''}
+                      placeholder={
+                        calc.isRateUnavailable
+                          ? 'ระบุอัตราดอกเบี้ย เช่น 1.99'
+                          : 'เช่น 1.99, 2.49, 2.99'
+                      }
+                      onFocus={() => {
+                        const initial =
+                          state.customInterestRate !== null
+                            ? String(state.customInterestRate)
+                            : calc.tableRate !== null
+                            ? String(calc.tableRate)
+                            : '';
+                        setRateDraft(initial);
+                      }}
                       onChange={(e) => {
-                        const val = e.target.value.trim();
-                        onUpdateState((p) => ({
-                          ...p,
-                          customInterestRate:
-                            val === '' ? null : Math.max(0, Number(val) || 0),
-                        }));
+                        const raw = e.target.value;
+                        setRateDraft(raw);
+                        const trimmed = raw.trim();
+                        if (trimmed === '') {
+                          return;
+                        }
+                        const parsed = Number(trimmed);
+                        if (!Number.isNaN(parsed)) {
+                          onUpdateState((p) => ({
+                            ...p,
+                            customInterestRate: Math.min(25, Math.max(0, parsed)),
+                          }));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (rateDraft !== null && rateDraft.trim() === '') {
+                          onUpdateState((p) => ({
+                            ...p,
+                            customInterestRate: null,
+                          }));
+                        }
+                        setRateDraft(null);
                       }}
                       className="w-full px-4 py-2.5 text-base font-bold font-mono-num bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
                     />
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                      {calc.isRateUnavailable
-                        ? 'ตารางไม่เปิดรับเงื่อนไขนี้ สามารถกรอกอัตราดอกเบี้ยเองได้'
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRateDraft(null);
+                          onUpdateState((p) => ({
+                            ...p,
+                            customInterestRate: null,
+                          }));
+                        }}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                          state.customInterestRate === null
+                            ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/50'
+                            : 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400'
+                        }`}
+                      >
+                        ตามตาราง
+                      </button>
+                      {INTEREST_RATE_PRESETS.map((presetRate) => {
+                        const active =
+                          state.customInterestRate !== null &&
+                          Math.abs(state.customInterestRate - presetRate) < 0.001;
+                        return (
+                          <button
+                            key={presetRate}
+                            type="button"
+                            onClick={() => {
+                              setRateDraft(null);
+                              onUpdateState((p) => ({
+                                ...p,
+                                customInterestRate: presetRate,
+                              }));
+                            }}
+                            className={`px-2.5 py-1 text-xs font-mono-num font-semibold rounded-lg border transition-colors cursor-pointer ${
+                              active
+                                ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/50'
+                                : 'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400'
+                            }`}
+                          >
+                            {presetRate.toFixed(2)}%
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                      {state.customInterestRate !== null
+                        ? `กำหนดอัตราดอกเบี้ยเอง: ${state.customInterestRate.toFixed(2)}% ต่อปี`
+                        : calc.isRateUnavailable
+                        ? 'ตารางไม่เปิดรับเงื่อนไขนี้ สามารถเลือกหรือกรอกอัตราดอกเบี้ยเองได้'
                         : `ตาราง ${calc.trim.rateTable === 'lumin' ? 'Lumin L DC' : 'มาตรฐาน'}: ${formatRate(
                             calc.tableRate
                           )}`}
@@ -944,46 +1274,417 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                 </div>
               </div>
 
-              {/* Early Payment Option */}
-              <button
-                type="button"
-                onClick={() =>
-                  onUpdateState((p) => ({
-                    ...p,
-                    payFirstInstallmentOnDelivery: !p.payFirstInstallmentOnDelivery,
-                  }))
-                }
-                className={`w-full flex items-center justify-between gap-3 p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                  state.payFirstInstallmentOnDelivery
-                    ? 'bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-400 text-slate-900 dark:text-white'
-                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-amber-400'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-                      state.payFirstInstallmentOnDelivery
-                        ? 'bg-emerald-600 text-white'
-                        : 'border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
-                    }`}
-                  >
-                    {state.payFirstInstallmentOnDelivery && (
-                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+              {/* Paired Finance Adjustments: Special Interest Discount & Early First Installment */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch pt-1">
+                {/* Left: Special Interest Rate Discount (Customizable, Can Hide/Disable) */}
+                <div
+                  className={`p-4 rounded-xl border flex flex-col justify-between space-y-3.5 transition-all ${
+                    state.enableSpecialInterestDiscount
+                      ? 'bg-amber-50/60 dark:bg-amber-500/10 border-amber-300 dark:border-amber-400/50'
+                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white">
+                          ส่วนลดดอกเบี้ยพิเศษ
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          กรอกหัวข้อ ดอกเบี้ยก่อนลด % ส่วนลด และดอกเบี้ยหลังลดได้เอง
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpecialDiscountDraft(null);
+                          setSpecialAfterRateDraft(null);
+                          onUpdateState((p) => ({
+                            ...p,
+                            enableSpecialInterestDiscount:
+                              !p.enableSpecialInterestDiscount,
+                          }));
+                        }}
+                        className={`min-h-[36px] px-3 py-1.5 text-xs font-bold rounded-lg border shrink-0 transition-colors cursor-pointer ${
+                          state.enableSpecialInterestDiscount
+                            ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        {state.enableSpecialInterestDiscount
+                          ? 'เปิดแสดงรายการ'
+                          : 'ปิดอยู่'}
+                      </button>
+                    </div>
+
+                    {state.enableSpecialInterestDiscount ? (
+                      <div className="space-y-3 pt-1">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                            ข้อความ / ชื่อรายการส่วนลดดอกเบี้ย (แก้ไขได้อิสระ)
+                          </label>
+                          <input
+                            type="text"
+                            value={state.specialInterestLabel ?? ''}
+                            placeholder="ระบุข้อความ เช่น ส่วนลดดอกเบี้ยพิเศษ"
+                            onChange={(e) =>
+                              onUpdateState((p) => ({
+                                ...p,
+                                specialInterestLabel: e.target.value,
+                              }))
+                            }
+                            className="w-full min-h-[40px] px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              ดอกเบี้ยก่อนลด (%)
+                            </label>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min={0}
+                              max={25}
+                              step={0.01}
+                              value={
+                                rateDraft !== null
+                                  ? rateDraft
+                                  : state.customInterestRate !== null
+                                  ? String(state.customInterestRate)
+                                  : calc.tableRate !== null
+                                  ? String(calc.tableRate)
+                                  : ''
+                              }
+                              placeholder="เช่น 2.49"
+                              onFocus={() => {
+                                const initial =
+                                  state.customInterestRate !== null
+                                    ? String(state.customInterestRate)
+                                    : calc.tableRate !== null
+                                    ? String(calc.tableRate)
+                                    : '';
+                                setRateDraft(initial);
+                              }}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                setRateDraft(raw);
+                                const trimmed = raw.trim();
+                                if (trimmed === '') return;
+                                const parsed = Number(trimmed);
+                                if (!Number.isNaN(parsed)) {
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    customInterestRate: Math.min(
+                                      25,
+                                      Math.max(0, parsed)
+                                    ),
+                                  }));
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  rateDraft !== null &&
+                                  rateDraft.trim() === ''
+                                ) {
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    customInterestRate: null,
+                                  }));
+                                }
+                                setRateDraft(null);
+                              }}
+                              className="w-full min-h-[40px] px-2.5 py-1.5 text-sm font-bold font-mono-num bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              ส่วนลดดอกเบี้ย (%)
+                            </label>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min={0}
+                              max={25}
+                              step={0.01}
+                              value={
+                                specialDiscountDraft !== null
+                                  ? specialDiscountDraft
+                                  : state.specialInterestDiscountMode ===
+                                    'target_rate'
+                                  ? String(calc.specialInterestDiscountApplied)
+                                  : String(
+                                      state.specialInterestDiscountRate ?? 0
+                                    )
+                              }
+                              placeholder="เช่น 0.25"
+                              onFocus={() => {
+                                const initial =
+                                  state.specialInterestDiscountMode ===
+                                  'target_rate'
+                                    ? String(calc.specialInterestDiscountApplied)
+                                    : String(
+                                        state.specialInterestDiscountRate ?? 0
+                                      );
+                                setSpecialDiscountDraft(initial);
+                              }}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                setSpecialDiscountDraft(raw);
+                                const trimmed = raw.trim();
+                                if (trimmed === '') return;
+                                const parsed = Number(trimmed);
+                                if (!Number.isNaN(parsed)) {
+                                  setSpecialAfterRateDraft(null);
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    specialInterestDiscountMode: 'discount_rate',
+                                    specialInterestDiscountRate: Math.min(
+                                      25,
+                                      Math.max(0, parsed)
+                                    ),
+                                    specialInterestTargetRate: null,
+                                  }));
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  specialDiscountDraft !== null &&
+                                  specialDiscountDraft.trim() === ''
+                                ) {
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    specialInterestDiscountMode: 'discount_rate',
+                                    specialInterestDiscountRate: 0,
+                                    specialInterestTargetRate: null,
+                                  }));
+                                }
+                                setSpecialDiscountDraft(null);
+                              }}
+                              className="w-full min-h-[40px] px-2.5 py-1.5 text-sm font-bold font-mono-num bg-white dark:bg-slate-950 text-emerald-700 dark:text-emerald-400 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              ดอกเบี้ยหลังลด (%)
+                            </label>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min={0}
+                              max={25}
+                              step={0.01}
+                              value={
+                                specialAfterRateDraft !== null
+                                  ? specialAfterRateDraft
+                                  : String(calc.rateAfterSpecialDiscount)
+                              }
+                              placeholder="เช่น 1.99"
+                              onFocus={() => {
+                                setSpecialAfterRateDraft(
+                                  String(calc.rateAfterSpecialDiscount)
+                                );
+                              }}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                setSpecialAfterRateDraft(raw);
+                                const trimmed = raw.trim();
+                                if (trimmed === '') return;
+                                const parsed = Number(trimmed);
+                                if (!Number.isNaN(parsed)) {
+                                  const target = Math.min(
+                                    25,
+                                    Math.max(0, parsed)
+                                  );
+                                  setSpecialDiscountDraft(null);
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    specialInterestDiscountMode: 'target_rate',
+                                    specialInterestTargetRate: target,
+                                  }));
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  specialAfterRateDraft !== null &&
+                                  specialAfterRateDraft.trim() === ''
+                                ) {
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    specialInterestDiscountMode: 'discount_rate',
+                                    specialInterestTargetRate: null,
+                                  }));
+                                }
+                                setSpecialAfterRateDraft(null);
+                              }}
+                              className="w-full min-h-[40px] px-2.5 py-1.5 text-sm font-bold font-mono-num bg-white dark:bg-slate-950 text-amber-700 dark:text-amber-300 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-white/80 dark:bg-slate-950/60 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
+                        ปิดการแสดงรายการนี้ไว้ (หากไม่มีส่วนลดดอกเบี้ยพิเศษ ระบบจะไม่แสดงในใบเสนอราคา)
+                      </div>
                     )}
-                  </span>
-                  <div>
-                    <div className="text-xs sm:text-sm font-bold">
-                      ชำระค่างวดงวดแรกวันรับรถ (ต้นงวด)
+                  </div>
+
+                  {state.enableSpecialInterestDiscount && (
+                    <div className="pt-2 border-t border-amber-200/80 dark:border-amber-400/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {calc.specialDiscountLabel}
+                      </span>
+                      <span className="font-mono-num font-bold text-slate-900 dark:text-amber-300">
+                        {calc.baseInterestRate.toFixed(2)}% →{' '}
+                        {calc.rateAfterSpecialDiscount.toFixed(2)}%
+                      </span>
                     </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      ลดอัตราดอกเบี้ยทันที {settings.earlyPaymentDiscount.toFixed(2)}% ต่อปี
+                  )}
+                </div>
+
+                {/* Right: Early First Installment Payment (Enable/Disable + Custom Amount) */}
+                <div
+                  className={`p-4 rounded-xl border flex flex-col justify-between space-y-3.5 transition-all ${
+                    state.payFirstInstallmentOnDelivery
+                      ? 'bg-emerald-50/75 dark:bg-emerald-950/25 border-emerald-400'
+                      : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs sm:text-sm font-extrabold text-slate-950 dark:text-white">
+                          ชำระค่างวดงวดแรกวันรับรถ (ต้นงวด)
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          ลดอัตราดอกเบี้ยทันที{' '}
+                          {settings.earlyPaymentDiscount.toFixed(2)}% ต่อปี
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFirstInstallmentDraft(null);
+                          onUpdateState((p) => ({
+                            ...p,
+                            payFirstInstallmentOnDelivery:
+                              !p.payFirstInstallmentOnDelivery,
+                          }));
+                        }}
+                        className={`min-h-[36px] px-3 py-1.5 text-xs font-bold rounded-lg border shrink-0 transition-colors cursor-pointer ${
+                          state.payFirstInstallmentOnDelivery
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        {state.payFirstInstallmentOnDelivery
+                          ? 'เปิดใช้งาน'
+                          : 'ปิดอยู่'}
+                      </button>
                     </div>
+
+                    {state.payFirstInstallmentOnDelivery ? (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                            ยอดชำระงวดแรกวันรับรถ (บาท)
+                          </label>
+                          {state.customFirstInstallmentAmount !== null &&
+                            state.customFirstInstallmentAmount !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFirstInstallmentDraft(null);
+                                  onUpdateState((p) => ({
+                                    ...p,
+                                    customFirstInstallmentAmount: null,
+                                  }));
+                                }}
+                                className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                เท่าค่างวด ({formatTHB(calc.monthlyInstallment)} ฿)
+                              </button>
+                            )}
+                        </div>
+                        <input
+                          type="number"
+                          min={0}
+                          step={100}
+                          value={
+                            firstInstallmentDraft !== null
+                              ? firstInstallmentDraft
+                              : state.customFirstInstallmentAmount !== null &&
+                                state.customFirstInstallmentAmount !== undefined
+                              ? String(state.customFirstInstallmentAmount)
+                              : String(calc.monthlyInstallment)
+                          }
+                          placeholder={String(calc.monthlyInstallment)}
+                          onFocus={() => {
+                            const init =
+                              state.customFirstInstallmentAmount !== null &&
+                              state.customFirstInstallmentAmount !== undefined
+                                ? String(state.customFirstInstallmentAmount)
+                                : String(calc.monthlyInstallment);
+                            setFirstInstallmentDraft(init);
+                          }}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setFirstInstallmentDraft(raw);
+                            const trimmed = raw.trim();
+                            if (trimmed === '') return;
+                            const parsed = Number(trimmed);
+                            if (!Number.isNaN(parsed)) {
+                              onUpdateState((p) => ({
+                                ...p,
+                                customFirstInstallmentAmount: Math.max(
+                                  0,
+                                  Math.round(parsed)
+                                ),
+                              }));
+                            }
+                          }}
+                          onBlur={() => {
+                            if (
+                              firstInstallmentDraft !== null &&
+                              firstInstallmentDraft.trim() === ''
+                            ) {
+                              onUpdateState((p) => ({
+                                ...p,
+                                customFirstInstallmentAmount: null,
+                              }));
+                            }
+                            setFirstInstallmentDraft(null);
+                          }}
+                          className="w-full min-h-[42px] px-3 py-2 text-sm font-bold font-mono-num bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border border-emerald-300 dark:border-emerald-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                          {state.customFirstInstallmentAmount !== null &&
+                          state.customFirstInstallmentAmount !== undefined
+                            ? 'กำหนดยอดชำระงวดแรกเอง — นำไปคำนวณยอดวันรับรถแล้ว'
+                            : 'คำนวณอัตโนมัติเท่ากับค่างวด 1 เดือน (สามารถแก้ไขยอดเองได้)'}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-white/80 dark:bg-slate-950/60 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
+                        ยังไม่ได้เปิดใช้ชำระงวดแรกวันรับรถ (กดเปิดเพื่อลดดอกเบี้ยและกำหนดยอดชำระงวดแรก)
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-emerald-200/80 dark:border-emerald-800/60 flex items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      อัตราดอกเบี้ยสุทธิที่ใช้คำนวณ
+                    </span>
+                    <span className="font-mono-num font-extrabold text-emerald-700 dark:text-emerald-400">
+                      {calc.effectiveInterestRate.toFixed(2)}% ต่อปี
+                    </span>
                   </div>
                 </div>
-                <span className="text-xs font-bold font-mono-num text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                  ดอกเบี้ยสุทธิ {calc.effectiveInterestRate.toFixed(2)}%
-                </span>
-              </button>
+              </div>
 
               {/* 4-Metric Real-Time Finance Breakdown */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
@@ -1456,19 +2157,34 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                 </div>
               </div>
 
-              {/* Editable Insurance, Warranty, Charger & Benefits */}
+              {/* Editable & Selectable Insurance, Warranty, Charger & Benefits */}
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-bold text-slate-950 dark:text-white flex items-center gap-1.5">
                       <Edit3 className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                      ประกันภัย การรับประกัน อุปกรณ์ชาร์จ และบริการอื่น ๆ
+                      เลือกและแก้ไขสิทธิประโยชน์ที่ลูกค้าได้รับ
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      เพิ่ม แก้ไข หรือลบสิทธิประโยชน์เฉพาะลูกค้าท่านนี้หรือบันทึกเป็นค่าเริ่มต้นของรุ่น
+                      ติ๊กเลือกสิทธิประโยชน์ที่ต้องการมอบให้ลูกค้ารายนี้ (เลือกแล้ว{' '}
+                      {calc.enabledBenefitTexts.length} รายการ)
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllBenefits}
+                      className="px-2.5 py-1.5 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg cursor-pointer"
+                    >
+                      เลือกทั้งหมด
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAllBenefits}
+                      className="px-2.5 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg cursor-pointer"
+                    >
+                      ไม่เลือกเลย
+                    </button>
                     {state.benefitsOverride && (
                       <button
                         type="button"
@@ -1502,91 +2218,57 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      ประกันภัยและการคุ้มครอง
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.insuranceAndAct}
-                      onChange={(e) =>
-                        updateBenefitField('insuranceAndAct', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      อุปกรณ์ชาร์จ (Home Charger)
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.homeCharger}
-                      onChange={(e) =>
-                        updateBenefitField('homeCharger', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      การรับประกันรถยนต์
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.vehicleWarranty}
-                      onChange={(e) =>
-                        updateBenefitField('vehicleWarranty', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      การรับประกันแบตเตอรี่
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.batteryWarranty}
-                      onChange={(e) =>
-                        updateBenefitField('batteryWarranty', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Lifetime Battery Warranty
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.lifetimeBatteryWarranty}
-                      onChange={(e) =>
-                        updateBenefitField('lifetimeBatteryWarranty', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      บริการช่วยเหลือฉุกเฉินและบริการอื่น ๆ
-                    </label>
-                    <input
-                      type="text"
-                      value={calc.activeBenefits.roadsideAssistance}
-                      onChange={(e) =>
-                        updateBenefitField('roadsideAssistance', e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-                    />
-                  </div>
+                  {CORE_BENEFIT_FIELDS.map((field) => {
+                    const isChecked = selectedBenefitKeys.includes(field.key);
+                    return (
+                      <div
+                        key={field.key}
+                        className={`p-3 rounded-xl border transition-all ${
+                          isChecked
+                            ? 'bg-amber-50/40 dark:bg-slate-900/90 border-amber-300/80 dark:border-amber-400/40'
+                            : 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-65'
+                        }`}
+                      >
+                        <label className="flex items-center justify-between gap-2 mb-2 cursor-pointer select-none">
+                          <span className="inline-flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleBenefitKey(field.key)}
+                              className="w-4 h-4 rounded accent-amber-500 cursor-pointer"
+                            />
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              {field.label}
+                            </span>
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                              isChecked
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                            }`}
+                          >
+                            {isChecked ? 'แสดงในใบเสนอราคา' : 'ไม่รวม'}
+                          </span>
+                        </label>
+                        <input
+                          type="text"
+                          value={calc.activeBenefits[field.key]}
+                          onChange={(e) =>
+                            updateBenefitField(field.key, e.target.value)
+                          }
+                          className="w-full px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Extra Benefit Items */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      สิทธิประโยชน์เพิ่มเติมอื่น ๆ
+                      สิทธิประโยชน์เพิ่มเติมอื่น ๆ (ติ๊กเลือกเพื่อรวมในใบเสนอราคา)
                     </span>
                     <button
                       type="button"
@@ -1602,34 +2284,63 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                       เพิ่มสิทธิประโยชน์
                     </button>
                   </div>
-                  {calc.activeBenefits.extraItems.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={item}
-                        placeholder={`สิทธิประโยชน์เพิ่มเติมข้อที่ ${idx + 1}`}
-                        onChange={(e) => {
-                          const next = [...calc.activeBenefits.extraItems];
-                          next[idx] = e.target.value;
-                          updateBenefitField('extraItems', next);
-                        }}
-                        className="flex-1 px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateBenefitField(
-                            'extraItems',
-                            calc.activeBenefits.extraItems.filter((_, i) => i !== idx)
-                          )
-                        }
-                        className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                        aria-label="ลบสิทธิประโยชน์"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
+                  {calc.activeBenefits.extraItems.map((item, idx) => {
+                    const isChecked = !disabledExtraIndices.includes(idx);
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleExtraBenefit(idx)}
+                          aria-label={`เลือกสิทธิประโยชน์เพิ่มเติมข้อที่ ${idx + 1}`}
+                          className="w-4 h-4 rounded accent-amber-500 shrink-0 cursor-pointer"
+                        />
+                        <input
+                          type="text"
+                          value={item}
+                          placeholder={`สิทธิประโยชน์เพิ่มเติมข้อที่ ${idx + 1}`}
+                          onChange={(e) => {
+                            const next = [...calc.activeBenefits.extraItems];
+                            next[idx] = e.target.value;
+                            updateBenefitField('extraItems', next);
+                          }}
+                          className={`flex-1 px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+                            !isChecked ? 'opacity-60' : ''
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onUpdateState((prev) => {
+                              const currentBenefits =
+                                prev.benefitsOverride ?? calc.trim.benefits;
+                              const nextExtras =
+                                currentBenefits.extraItems.filter(
+                                  (_, i) => i !== idx
+                                );
+                              const nextDisabled = (
+                                prev.disabledExtraBenefitIndices ?? []
+                              )
+                                .filter((i) => i !== idx)
+                                .map((i) => (i > idx ? i - 1 : i));
+                              return {
+                                ...prev,
+                                benefitsOverride: {
+                                  ...currentBenefits,
+                                  extraItems: nextExtras,
+                                },
+                                disabledExtraBenefitIndices: nextDisabled,
+                              };
+                            });
+                          }}
+                          className="p-2 text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                          aria-label="ลบสิทธิประโยชน์"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div>
@@ -1710,13 +2421,13 @@ export const StepWizard: React.FC<StepWizardProps> = ({
           )}
 
           {/* Step Footer Navigation Controls */}
-          <div className={`${CARD_SURFACE} p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3`}>
+          <div className={`${CARD_SURFACE} p-3.5 sm:p-5 flex flex-wrap items-center justify-between gap-3`}>
             <div>
               {currentStep > 1 && (
                 <button
                   type="button"
                   onClick={goPrev}
-                  className="px-4 py-2.5 text-xs sm:text-sm font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  className="min-h-[46px] px-4 py-2.5 text-sm font-semibold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   ย้อนกลับ
@@ -1729,7 +2440,7 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                 <button
                   type="button"
                   onClick={() => onChangeStep('preview')}
-                  className="px-4 py-2.5 text-xs sm:text-sm font-semibold bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-400/40 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  className="min-h-[46px] px-4 py-2.5 text-sm font-semibold bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-400/40 rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Eye className="w-4 h-4" />
                   กลับไปดูใบเสนอราคา
@@ -1739,7 +2450,7 @@ export const StepWizard: React.FC<StepWizardProps> = ({
               <button
                 type="button"
                 onClick={goNext}
-                className="btn-gold-copper px-5 py-2.5 text-xs sm:text-sm font-extrabold rounded-xl inline-flex items-center gap-2 cursor-pointer"
+                className="min-h-[46px] btn-gold-copper px-5 py-2.5 text-sm font-extrabold rounded-xl inline-flex items-center gap-2 cursor-pointer"
               >
                 {currentStep < 5 ? (
                   <>
@@ -1764,10 +2475,7 @@ export const StepWizard: React.FC<StepWizardProps> = ({
             <div className="p-5 sm:p-6 space-y-5">
               <div className="flex items-start justify-between gap-3 pb-4 border-b border-white/10">
                 <div>
-                  <div className="text-[11px] font-mono-num text-amber-300 font-semibold">
-                    {session.quoteNumber}
-                  </div>
-                  <div className="text-base font-extrabold text-white mt-0.5">
+                  <div className="text-base font-extrabold text-white">
                     {calc.trim.modelName} · {calc.trim.trimName}
                   </div>
                   <div className="text-xs text-slate-300 mt-0.5">
@@ -1858,6 +2566,26 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                         {formatTHB(calc.financeAmount)} ฿
                       </dd>
                     </div>
+                    {calc.specialDiscountActive && (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-amber-300 truncate">
+                          {calc.specialDiscountLabel}
+                        </dt>
+                        <dd className="font-mono-num font-semibold text-amber-300 whitespace-nowrap">
+                          {calc.baseInterestRate.toFixed(2)}% →{' '}
+                          {calc.rateAfterSpecialDiscount.toFixed(2)}%
+                        </dd>
+                      </div>
+                    )}
+                    {state.payFirstInstallmentOnDelivery &&
+                      calc.firstInstallmentDueOnDelivery > 0 && (
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-emerald-300">ชำระงวดแรกวันรับรถ</dt>
+                          <dd className="font-mono-num font-semibold text-emerald-300">
+                            {formatTHB(calc.firstInstallmentDueOnDelivery)} ฿
+                          </dd>
+                        </div>
+                      )}
                     <div className="flex justify-between gap-3">
                       <dt className="text-slate-300">ดอกเบี้ยทั้งหมด</dt>
                       <dd className="font-mono-num text-slate-200">
@@ -1874,14 +2602,26 @@ export const StepWizard: React.FC<StepWizardProps> = ({
                 )}
               </dl>
 
-              <button
-                type="button"
-                onClick={() => onChangeStep('preview')}
-                className="w-full btn-gold-copper py-2.5 px-4 text-xs sm:text-sm font-extrabold rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Eye className="w-4 h-4" />
-                เปิดหน้าใบเสนอราคา (Preview)
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => onChangeStep('preview')}
+                  className="w-full btn-gold-copper py-2.5 px-4 text-xs sm:text-sm font-extrabold rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Eye className="w-4 h-4" />
+                  เปิดหน้าใบเสนอราคา (Preview)
+                </button>
+                {onCopyLineText && (
+                  <button
+                    type="button"
+                    onClick={onCopyLineText}
+                    className="w-full py-2 px-4 text-xs font-bold bg-[#06C755]/20 hover:bg-[#06C755]/30 text-emerald-300 border border-[#06C755]/50 rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    คัดลอกข้อความส่ง LINE ทันที
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </aside>

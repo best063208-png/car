@@ -1,50 +1,124 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Moon, Plus, RotateCcw, Save, Sun, Trash2, Upload } from 'lucide-react';
 import {
+  Check,
+  Image as ImageIcon,
+  Moon,
+  Palette,
+  Plus,
+  RotateCcw,
+  Save,
+  Sun,
+  Trash2,
+  Type,
+  Upload,
+} from 'lucide-react';
+import {
+  DEFAULT_QUOTATION_DESIGN,
   DOWN_PERCENT_TIERS,
   JIN_MOTOR_LOGO_PATH,
+  QUOTATION_DESIGN_PRESETS,
+  QUOTATION_FONT_OPTIONS,
   TENOR_OPTIONS,
 } from '../data/defaultCatalog';
 import {
+  CalculatedQuote,
   DealerSettings,
+  LogoPosition,
+  QuotationDesignConfig,
+  QuotationFontFamily,
+  QuoteState,
   RateTableType,
+  SavedQuotationTheme,
   VehicleTrim,
 } from '../types/dealer';
+import { calculateQuote } from '../utils/finance';
+import { QuotationSheet } from './QuotationSheet';
+
+export type SettingsTab = 'design' | 'showroom' | 'pricing' | 'rates' | 'benefits';
 
 interface SettingsViewProps {
   settings: DealerSettings;
   theme: 'light' | 'dark';
   lastSavedAt: string | null;
+  initialTab?: SettingsTab;
+  previewState: QuoteState;
   onChangeTheme: (theme: 'light' | 'dark') => void;
   onSaveSettings: (nextSettings: DealerSettings) => void;
   onResetDefaults: () => void;
   onNotify: (message: string) => void;
 }
 
-type SettingsTab = 'showroom' | 'pricing' | 'rates' | 'benefits';
-
 export const SettingsView: React.FC<SettingsViewProps> = ({
   settings: savedSettings,
   theme,
   lastSavedAt,
+  initialTab = 'showroom',
+  previewState,
   onChangeTheme,
   onSaveSettings,
   onResetDefaults,
   onNotify,
 }) => {
   const [settings, setDraftSettings] = useState<DealerSettings>(savedSettings);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('showroom');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [rateMatrixTab, setRateMatrixTab] = useState<RateTableType>('standard');
   const [editingTrimId, setEditingTrimId] = useState<string>(
     savedSettings.trims[0]?.id || ''
   );
   const [confirmReset, setConfirmReset] = useState(false);
+  const [themeSaveName, setThemeSaveName] = useState('');
 
   useEffect(() => {
     setDraftSettings(savedSettings);
   }, [savedSettings]);
 
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
   const onUpdateSettings = setDraftSettings;
+
+  const activeDesign: QuotationDesignConfig = useMemo(
+    () => ({
+      ...DEFAULT_QUOTATION_DESIGN,
+      ...(settings.quotationDesign || {}),
+    }),
+    [settings.quotationDesign]
+  );
+
+  const livePreviewCalc: CalculatedQuote = useMemo(
+    () => calculateQuote(settings, previewState),
+    [settings, previewState]
+  );
+
+  const updateDesign = (patch: Partial<QuotationDesignConfig>) => {
+    onUpdateSettings((prev) => ({
+      ...prev,
+      quotationDesign: {
+        ...DEFAULT_QUOTATION_DESIGN,
+        ...(prev.quotationDesign || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveNamedTheme = () => {
+    const cleanName = themeSaveName.trim() || `ธีมที่ออกแบบ ${(settings.savedDesigns?.length || 0) + 1}`;
+    const newSaved: SavedQuotationTheme = {
+      id: `theme-${Date.now()}`,
+      name: cleanName,
+      createdAt: new Date().toISOString(),
+      design: { ...activeDesign },
+    };
+    const nextSettings: DealerSettings = {
+      ...settings,
+      savedDesigns: [newSaved, ...(settings.savedDesigns || [])],
+    };
+    setDraftSettings(nextSettings);
+    onSaveSettings(nextSettings);
+    setThemeSaveName('');
+    onNotify(`บันทึกธีม "${cleanName}" เพื่อใช้ครั้งต่อไปเรียบร้อยแล้ว`);
+  };
 
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(savedSettings),
@@ -292,6 +366,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/70 dark:bg-slate-900/90 border border-transparent dark:border-slate-800 rounded-2xl overflow-x-auto">
         {(
           [
+            { id: 'design', label: 'ปรับแต่งดีไซน์ใบเสนอราคา' },
             { id: 'showroom', label: 'ข้อมูลโชว์รูมและเซลส์' },
             { id: 'pricing', label: 'ราคารถและส่วนลด' },
             { id: 'rates', label: 'ตารางอัตราดอกเบี้ย' },
@@ -302,7 +377,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`min-h-[40px] px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === tab.id
                 ? 'bg-gradient-to-r from-slate-950 to-slate-800 dark:from-[#162652] dark:to-[#1e336b] text-amber-400 dark:text-amber-300 border border-transparent dark:border-amber-400/40 shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
@@ -312,6 +387,412 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         ))}
       </div>
+
+      {/* Tab 0: Quotation Design & Theme Customization Studio with Live Preview */}
+      {activeTab === 'design' && (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+          {/* Left Controls */}
+          <div className="xl:col-span-5 space-y-5">
+            {/* Presets & Saved Custom Themes */}
+            <div className="card-premium rounded-2xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white flex items-center gap-2">
+                  <Palette className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  ธีมสำเร็จรูปและธีมที่บันทึกไว้
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateDesign({ ...DEFAULT_QUOTATION_DESIGN });
+                    onNotify('คืนค่าดีไซน์ใบเสนอราคาเริ่มต้นแล้ว');
+                  }}
+                  className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  ค่าเริ่มต้น
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {QUOTATION_DESIGN_PRESETS.map((preset) => {
+                  const isActive = activeDesign.presetId === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => updateDesign({ ...preset.design })}
+                      className={`min-h-[44px] p-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 cursor-pointer ${
+                        isActive
+                          ? 'bg-slate-950 dark:bg-[#162652] text-white border-amber-400 shadow-sm'
+                          : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                      }`}
+                    >
+                      <span className="flex items-center gap-0.5 shrink-0">
+                        <span
+                          className="w-4 h-4 rounded-full border border-white/40"
+                          style={{ backgroundColor: preset.design.primaryColor }}
+                        />
+                        <span
+                          className="w-4 h-4 rounded-full border border-white/40 -ml-1.5"
+                          style={{ backgroundColor: preset.design.tableHeaderBgColor }}
+                        />
+                      </span>
+                      <span className="text-xs font-bold truncate">
+                        {preset.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Save Current Theme as Named Preset */}
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  บันทึกธีมปัจจุบันไว้ใช้ครั้งต่อไป
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={themeSaveName}
+                    placeholder="ตั้งชื่อธีม เช่น ธีมโชว์รูมหลัก"
+                    onChange={(e) => setThemeSaveName(e.target.value)}
+                    className="flex-1 min-h-[42px] px-3 py-2 text-xs sm:text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveNamedTheme}
+                    className="btn-gold-copper min-h-[42px] px-3.5 py-2 text-xs font-extrabold rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    บันทึกธีม
+                  </button>
+                </div>
+
+                {(settings.savedDesigns || []).length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                      ธีมส่วนตัวที่บันทึกไว้
+                    </div>
+                    <div className="space-y-1.5">
+                      {(settings.savedDesigns || []).map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateDesign({ ...item.design, presetId: item.id });
+                              onNotify(`ใช้ธีม "${item.name}" แล้ว`);
+                            }}
+                            className="flex items-center gap-2 text-left flex-1 min-w-0 cursor-pointer"
+                          >
+                            <span
+                              className="w-4 h-4 rounded-full shrink-0 border border-slate-300"
+                              style={{ backgroundColor: item.design.primaryColor }}
+                            />
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                              {item.name}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdateSettings((prev) => ({
+                                ...prev,
+                                savedDesigns: (prev.savedDesigns || []).filter(
+                                  (d) => d.id !== item.id
+                                ),
+                              }))
+                            }
+                            className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                            aria-label="ลบธีมที่บันทึก"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Color Customization Pickers */}
+            <div className="card-premium rounded-2xl p-4 sm:p-5 space-y-4">
+              <h3 className="text-sm font-extrabold text-slate-950 dark:text-white">
+                ปรับแต่งสีใบเสนอราคา
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(
+                  [
+                    { key: 'primaryColor', label: 'สีหลัก (แถบเน้น / ป้ายหัวข้อ)' },
+                    { key: 'headerBgColor', label: 'สีหัวกระดาษ (พื้นหลัง)' },
+                    { key: 'headerTextColor', label: 'สีตัวอักษรหัวกระดาษ' },
+                    { key: 'backgroundColor', label: 'สีพื้นหลังใบเสนอราคา' },
+                    { key: 'textColor', label: 'สีตัวอักษรเนื้อหา' },
+                    { key: 'tableHeaderBgColor', label: 'สีแถบตารางราคาและสรุป' },
+                    { key: 'tableHeaderTextColor', label: 'สีตัวอักษรแถบตารางราคา' },
+                    { key: 'sectionTitleColor', label: 'สีหัวข้อและยอดรวม' },
+                  ] as const
+                ).map(({ key, label }) => {
+                  const val = activeDesign[key];
+                  return (
+                    <div
+                      key={key}
+                      className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 space-y-1.5"
+                    >
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        {label}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={/^#[0-9a-fA-F]{6}$/.test(val) ? val : '#0f172a'}
+                          onChange={(e) =>
+                            updateDesign({ [key]: e.target.value, presetId: 'custom' })
+                          }
+                          aria-label={label}
+                          className="w-10 h-9 rounded-lg border border-slate-300 dark:border-slate-700 cursor-pointer bg-transparent shrink-0"
+                        />
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={(e) =>
+                            updateDesign({ [key]: e.target.value, presetId: 'custom' })
+                          }
+                          className="w-full px-2.5 py-1.5 text-xs font-mono-num uppercase bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Typography & Font Size */}
+            <div className="card-premium rounded-2xl p-4 sm:p-5 space-y-4">
+              <h3 className="text-sm font-extrabold text-slate-950 dark:text-white flex items-center gap-2">
+                <Type className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                รูปแบบและขนาดตัวอักษร
+              </h3>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  เลือกรูปแบบตัวอักษร (Font)
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {QUOTATION_FONT_OPTIONS.map((fontOpt) => {
+                    const active = activeDesign.fontFamily === fontOpt.id;
+                    return (
+                      <button
+                        key={fontOpt.id}
+                        type="button"
+                        onClick={() =>
+                          updateDesign({
+                            fontFamily: fontOpt.id as QuotationFontFamily,
+                          })
+                        }
+                        style={{ fontFamily: `'${fontOpt.id}', sans-serif` }}
+                        className={`min-h-[44px] px-3.5 py-2 rounded-xl border text-left flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                          active
+                            ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/70 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-sm font-bold">{fontOpt.label}</div>
+                          <div
+                            className={`text-[11px] ${
+                              active
+                                ? 'text-slate-300'
+                                : 'text-slate-500 dark:text-slate-400'
+                            }`}
+                          >
+                            {fontOpt.desc}
+                          </div>
+                        </div>
+                        {active && <Check className="w-4 h-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    ขนาดตัวอักษรพื้นฐาน
+                  </label>
+                  <span className="text-xs font-mono-num font-bold text-amber-700 dark:text-amber-300">
+                    {activeDesign.fontSizePx} px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={12}
+                  max={17}
+                  step={1}
+                  value={activeDesign.fontSizePx}
+                  onChange={(e) =>
+                    updateDesign({ fontSizePx: Number(e.target.value) || 14 })
+                  }
+                  className="w-full accent-amber-500 cursor-pointer"
+                />
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { px: 12, label: 'เล็ก (12)' },
+                    { px: 14, label: 'กลาง (14)' },
+                    { px: 15, label: 'ใหญ่ (15)' },
+                    { px: 16, label: 'ใหญ่มาก (16)' },
+                  ].map((s) => (
+                    <button
+                      key={s.px}
+                      type="button"
+                      onClick={() => updateDesign({ fontSizePx: s.px })}
+                      className={`min-h-[36px] py-1 px-2 text-xs font-semibold rounded-lg border cursor-pointer ${
+                        activeDesign.fontSizePx === s.px
+                          ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Logo Upload & Position */}
+            <div className="card-premium rounded-2xl p-4 sm:p-5 space-y-4">
+              <h3 className="text-sm font-extrabold text-slate-950 dark:text-white flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                โลโก้บริษัท / โชว์รูม และตำแหน่งโลโก้
+              </h3>
+
+              <div className="flex items-center gap-3">
+                {settings.showroom.logoUrl ? (
+                  <img
+                    src={settings.showroom.logoUrl}
+                    alt={settings.showroom.showroomName}
+                    referrerPolicy="no-referrer"
+                    className="w-14 h-14 object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white p-1 shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center text-[11px] text-slate-400 shrink-0">
+                    ไม่มีโลโก้
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <label className="min-h-[40px] px-3 py-2 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] text-amber-300 rounded-xl inline-flex items-center gap-1.5 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    เพิ่ม/เปลี่ยนโลโก้
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateSettings((prev) => ({
+                        ...prev,
+                        showroom: {
+                          ...prev.showroom,
+                          logoUrl: JIN_MOTOR_LOGO_PATH,
+                        },
+                      }));
+                      onNotify('ใช้โลโก้ JIN MOTOR เริ่มต้นแล้ว');
+                    }}
+                    className="min-h-[40px] px-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer"
+                  >
+                    โลโก้เดิม
+                  </button>
+                  {settings.showroom.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings((prev) => ({
+                          ...prev,
+                          showroom: { ...prev.showroom, logoUrl: '' },
+                        }))
+                      }
+                      className="min-h-[40px] px-3 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-xl cursor-pointer"
+                    >
+                      ซ่อนโลโก้
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  ตำแหน่งโลโก้บนหัวกระดาษ
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'left', label: 'ชิดซ้าย' },
+                      { id: 'center', label: 'กึ่งกลาง' },
+                      { id: 'right', label: 'ชิดขวา' },
+                    ] as { id: LogoPosition; label: string }[]
+                  ).map((pos) => {
+                    const active = activeDesign.logoPosition === pos.id;
+                    return (
+                      <button
+                        key={pos.id}
+                        type="button"
+                        onClick={() => updateDesign({ logoPosition: pos.id })}
+                        className={`min-h-[42px] py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                          active
+                            ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 border-amber-400/60 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-amber-400'
+                        }`}
+                      >
+                        {pos.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Real-Time Live Quotation Preview */}
+          <div className="xl:col-span-7 xl:sticky xl:top-20 space-y-3">
+            <div className="card-premium rounded-2xl p-4 sm:p-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-slate-950 dark:text-white">
+                    ตัวอย่างใบเสนอราคาแบบเรียลไทม์
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    สี ตัวอักษร ขนาด และตำแหน่งโลโก้จะอัปเดตทันที ก่อนกดปุ่ม &quot;บันทึกการตั้งค่า&quot;
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSaveSettings(settings)}
+                  className="btn-gold-copper min-h-[42px] px-4 py-2 text-xs font-extrabold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  บันทึกดีไซน์นี้
+                </button>
+              </div>
+
+              <QuotationSheet
+                settings={settings}
+                state={previewState}
+                calc={livePreviewCalc}
+                designOverride={activeDesign}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab 1: Showroom & Sales Advisor */}
       {activeTab === 'showroom' && (
@@ -475,30 +956,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   }))
                 }
                 className="w-full px-3.5 py-2 text-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                จำนวนวันยืนราคาในใบเสนอราคา
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={settings.showroom.quoteValidityDays}
-                onChange={(e) =>
-                  onUpdateSettings((prev) => ({
-                    ...prev,
-                    showroom: {
-                      ...prev.showroom,
-                      quoteValidityDays: Math.max(
-                        1,
-                        Number(e.target.value) || 15
-                      ),
-                    },
-                  }))
-                }
-                className="w-full px-3.5 py-2 text-sm font-mono-num bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
               />
             </div>
 
