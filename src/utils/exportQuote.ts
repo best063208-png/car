@@ -307,6 +307,49 @@ export async function shareFinanceSubmissionToLine(
   return 'fallback_required';
 }
 
+export async function shareFinanceFilesOnly(
+  files: File[],
+  title = 'รูปภาพใบจอง'
+): Promise<'shared' | 'downloaded' | 'permission_denied'> {
+  if (files.length === 0) return 'downloaded';
+
+  const nav = navigator as Navigator & {
+    canShare?: (data?: ShareData) => boolean;
+  };
+
+  if (
+    typeof nav.share === 'function' &&
+    typeof nav.canShare === 'function' &&
+    nav.canShare({ files })
+  ) {
+    try {
+      await nav.share({ title, files });
+      return 'shared';
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (
+        err instanceof Error &&
+        (err.name === 'NotAllowedError' || err.name === 'SecurityError')
+      ) {
+        return 'permission_denied';
+      }
+    }
+  }
+
+  files.forEach((file, idx) => {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name || `ใบจอง_${idx + 1}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+  });
+
+  return 'downloaded';
+}
+
 async function renderNodeToPngDataUrl(node: HTMLElement): Promise<string> {
   return renderNodeToImageDataUrl(node, 'png');
 }

@@ -25,6 +25,7 @@ import {
 } from '../types/dealer';
 import {
   FinanceShareResult,
+  shareFinanceFilesOnly,
   shareFinanceSubmissionToLine,
 } from '../utils/exportQuote';
 import {
@@ -129,9 +130,41 @@ export const FinanceSubmissionView: React.FC<FinanceSubmissionViewProps> = ({
     useState<FinanceAttachment | null>(null);
   const [isSharing, setIsSharing] = useState(false);
   const [copiedJustNow, setCopiedJustNow] = useState(false);
+  const [sendMode, setSendMode] = useState<
+    'together' | 'image_first' | 'text_first'
+  >('together');
+  const [stepProgress, setStepProgress] = useState<{
+    sessionId: string;
+    imagesSent: boolean;
+    textSent: boolean;
+  }>({
+    sessionId: selectedSession.id,
+    imagesSent: false,
+    textSent: false,
+  });
   const [shareFallbackModal, setShareFallbackModal] = useState<{
     mode: FinanceShareResult;
   } | null>(null);
+
+  const imagesSent =
+    stepProgress.sessionId === selectedSession.id && stepProgress.imagesSent;
+  const textSent =
+    stepProgress.sessionId === selectedSession.id && stepProgress.textSent;
+
+  const markImagesSent = () =>
+    setStepProgress((prev) => ({
+      sessionId: selectedSession.id,
+      imagesSent: true,
+      textSent: prev.sessionId === selectedSession.id ? prev.textSent : false,
+    }));
+
+  const markTextSent = () =>
+    setStepProgress((prev) => ({
+      sessionId: selectedSession.id,
+      imagesSent:
+        prev.sessionId === selectedSession.id ? prev.imagesSent : false,
+      textSent: true,
+    }));
 
   const updateState = (updater: (prev: QuoteState) => QuoteState) => {
     onUpdateQuoteState(selectedSession.id, updater);
@@ -180,8 +213,11 @@ export const FinanceSubmissionView: React.FC<FinanceSubmissionViewProps> = ({
       );
 
       if (result === 'shared_with_files') {
+        markImagesSent();
+        markTextSent();
         onNotify('เปิดหน้าต่างแชร์ข้อความและรูปภาพไปยัง LINE เรียบร้อยแล้ว');
       } else if (result === 'shared_files_only') {
+        markImagesSent();
         try {
           await navigator.clipboard.writeText(financeLineText);
         } catch {
@@ -190,6 +226,7 @@ export const FinanceSubmissionView: React.FC<FinanceSubmissionViewProps> = ({
         setShareFallbackModal({ mode: 'shared_files_only' });
         onNotify('แชร์รูปภาพแล้ว และคัดลอกข้อความงานไฟแนนซ์ไว้ให้สำหรับวางใน LINE');
       } else if (result === 'shared_text_only') {
+        markTextSent();
         onNotify('เปิดหน้าต่างแชร์ข้อความงานไฟแนนซ์เรียบร้อยแล้ว');
       } else {
         try {
@@ -209,34 +246,71 @@ export const FinanceSubmissionView: React.FC<FinanceSubmissionViewProps> = ({
     }
   };
 
+  const handleSendImagesStep = async () => {
+    if (attachments.length === 0) {
+      onNotify('กรุณาแนบรูปภาพใบจองอย่างน้อย 1 รูปก่อนส่งรูป');
+      return;
+    }
+    setIsSharing(true);
+    try {
+      const files = attachments.map((a) => a.file);
+      const res = await shareFinanceFilesOnly(
+        files,
+        `รูปใบจอง ${calc.trim.modelName} ${calc.trim.trimName}`
+      );
+      if (res === 'shared') {
+        markImagesSent();
+        onNotify('ส่งรูปใบจองเข้า LINE แล้ว สามารถกดส่งข้อความในขั้นตอนถัดไปได้ทันที');
+      } else if (res === 'downloaded') {
+        markImagesSent();
+        onNotify('บันทึกรูปภาพใบจองลงเครื่องแล้ว สามารถเลือกแนบในแชท LINE ได้ทันที');
+      } else {
+        onNotify('สิทธิ์การแชร์ถูกจำกัด กรุณาบันทึกรูปแล้วแนบส่งใน LINE');
+      }
+    } catch (err) {
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        onNotify('ไม่สามารถแชร์รูปภาพได้ กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleSendTextStep = async (copyAndOpenLine = true) => {
+    try {
+      await navigator.clipboard.writeText(financeLineText);
+      setCopiedJustNow(true);
+      window.setTimeout(() => setCopiedJustNow(false), 2000);
+    } catch {
+      // Ignore clipboard error on restricted contexts
+    }
+    markTextSent();
+    if (copyAndOpenLine) {
+      onNotify('เปิด LINE เพื่อส่งข้อความงานไฟแนนซ์แล้ว (คัดลอกข้อความสำรองไว้ด้วย)');
+    } else {
+      onNotify('คัดลอกข้อความส่งงานไฟแนนซ์แล้ว สามารถวาง (Paste) ในแชท LINE เดิมได้เลย');
+    }
+  };
+
   const handleShareFilesOnly = async () => {
     if (attachments.length === 0) return;
-    const files = attachments.map((a) => a.file);
-    const nav = navigator as Navigator & {
-      canShare?: (data?: ShareData) => boolean;
-    };
-    if (
-      typeof nav.share === 'function' &&
-      typeof nav.canShare === 'function' &&
-      nav.canShare({ files })
-    ) {
-      try {
-        await nav.share({ title: 'รูปภาพใบจอง', files });
+    try {
+      const res = await shareFinanceFilesOnly(
+        attachments.map((a) => a.file),
+        'รูปภาพใบจอง'
+      );
+      if (res === 'shared') {
+        markImagesSent();
         onNotify('เปิดเมนูแชร์รูปภาพใบจองแล้ว');
-        return;
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
+      } else if (res === 'downloaded') {
+        markImagesSent();
+        onNotify('บันทึกรูปภาพใบจองลงเครื่องแล้ว สามารถเลือกรูปส่งในแชท LINE ได้ทันที');
+      }
+    } catch (err) {
+      if (!(err instanceof Error && err.name === 'AbortError')) {
+        onNotify('เกิดข้อผิดพลาดในการส่งรูปภาพใบจอง');
       }
     }
-    attachments.forEach((item) => {
-      const link = document.createElement('a');
-      link.href = item.previewUrl;
-      link.download = item.name || `ใบจอง_${item.id}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    });
-    onNotify('บันทึกรูปภาพใบจองลงเครื่องแล้ว สามารถเลือกรูปส่งในแชท LINE ได้ทันที');
   };
 
   const downPctLabel = Number.isInteger(Number(calc.downPercentActual.toFixed(1)))
@@ -681,54 +755,275 @@ export const FinanceSubmissionView: React.FC<FinanceSubmissionViewProps> = ({
               </div>
 
               {/* Exact Formatted LINE Message Box */}
-              <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans border border-slate-800 max-h-[420px] overflow-y-auto">
+              <pre className="p-4 rounded-xl bg-slate-950 text-slate-100 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans border border-slate-800 max-h-[380px] overflow-y-auto">
                 {financeLineText}
               </pre>
 
-              {/* Action Buttons */}
-              <div className="space-y-2.5">
-                <button
-                  type="button"
-                  disabled={isSharing}
-                  onClick={handleSendToLine}
-                  className="w-full min-h-[48px] px-4 py-3 text-sm font-extrabold bg-[#06C755] hover:bg-[#05b24c] disabled:opacity-60 text-white rounded-xl inline-flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-colors"
-                >
-                  <Share2 className="w-4 h-4 shrink-0" />
-                  <span>
-                    {attachments.length > 0
-                      ? `ส่งงานเข้า LINE พร้อมรูปใบจอง (${attachments.length} รูป)`
-                      : 'ส่งงานเข้า LINE'}
+              {/* Send Mode Selector: Together vs Image-First vs Chat/Text-First */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    เลือกรูปแบบการส่งเข้า LINE
                   </span>
-                </button>
+                  {(imagesSent || textSent) && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStepProgress({
+                          sessionId: selectedSession.id,
+                          imagesSent: false,
+                          textSent: false,
+                        })
+                      }
+                      className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer"
+                    >
+                      รีเซ็ตสถานะการส่ง
+                    </button>
+                  )}
+                </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
                   <button
                     type="button"
-                    onClick={handleCopyFinanceText}
-                    className="min-h-[44px] px-3 py-2 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] dark:hover:bg-[#1e336b] text-amber-300 rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    onClick={() => setSendMode('together')}
+                    className={`min-h-[38px] px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                      sendMode === 'together'
+                        ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                    }`}
                   >
-                    {copiedJustNow ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                    <span>{copiedJustNow ? 'คัดลอกแล้ว' : 'คัดลอกข้อความ'}</span>
+                    ส่งรูป + ข้อความพร้อมกัน
                   </button>
-
-                  <a
-                    href={lineTextOnlyUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="min-h-[44px] px-3 py-2 text-xs font-bold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center justify-center gap-1.5"
+                  <button
+                    type="button"
+                    onClick={() => setSendMode('image_first')}
+                    className={`min-h-[38px] px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                      sendMode === 'image_first'
+                        ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                    }`}
                   >
-                    <Send className="w-3.5 h-3.5 text-[#06C755]" />
-                    <span>เปิดแชท LINE</span>
-                  </a>
+                    ส่งรูปก่อน → ข้อความ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSendMode('text_first')}
+                    className={`min-h-[38px] px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                      sendMode === 'text_first'
+                        ? 'bg-slate-950 dark:bg-[#162652] text-amber-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-white'
+                    }`}
+                  >
+                    ส่งข้อความ/แชทก่อน → รูป
+                  </button>
                 </div>
               </div>
 
+              {/* Action Controls Based on Selected Mode */}
+              {sendMode === 'together' && (
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    disabled={isSharing}
+                    onClick={handleSendToLine}
+                    className="w-full min-h-[48px] px-4 py-3 text-sm font-extrabold bg-[#06C755] hover:bg-[#05b24c] disabled:opacity-60 text-white rounded-xl inline-flex items-center justify-center gap-2 shadow-sm cursor-pointer transition-colors"
+                  >
+                    <Share2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      {attachments.length > 0
+                        ? `ส่งรูปใบจอง (${attachments.length} รูป) + ข้อความพร้อมกัน`
+                        : 'ส่งข้อความงานเข้า LINE'}
+                    </span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={handleCopyFinanceText}
+                      className="min-h-[44px] px-3 py-2 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] dark:hover:bg-[#1e336b] text-amber-300 rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedJustNow ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>{copiedJustNow ? 'คัดลอกแล้ว' : 'คัดลอกข้อความ'}</span>
+                    </button>
+
+                    <a
+                      href={lineTextOnlyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => markTextSent()}
+                      className="min-h-[44px] px-3 py-2 text-xs font-bold bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-xl inline-flex items-center justify-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5 text-[#06C755]" />
+                      <span>เปิดแชท LINE</span>
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {sendMode === 'image_first' && (
+                <div className="space-y-3">
+                  {/* Step 1: Send Images First */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      imagesSent
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-400'
+                        : 'bg-slate-50 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-slate-950 dark:text-white">
+                        ขั้นตอนที่ 1: ส่งรูปใบจองเข้า LINE ก่อน
+                      </span>
+                      {imagesSent && (
+                        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          ส่งรูปแล้ว
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isSharing || attachments.length === 0}
+                      onClick={handleSendImagesStep}
+                      className="w-full min-h-[46px] px-4 py-2.5 text-xs sm:text-sm font-extrabold btn-gold-copper disabled:opacity-50 rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        {attachments.length > 0
+                          ? `ส่งรูปภาพใบจอง (${attachments.length} รูป)`
+                          : 'กรุณาแนบรูปภาพใบจองด้านซ้ายก่อน'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Step 2: Send Text / Open LINE Chat */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      textSent
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-400'
+                        : 'bg-slate-50 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-slate-950 dark:text-white">
+                        ขั้นตอนที่ 2: ส่งข้อความเข้าแชท LINE ต่อ
+                      </span>
+                      {textSent && (
+                        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          ส่งข้อความแล้ว
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <a
+                        href={lineTextOnlyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => handleSendTextStep(true)}
+                        className="min-h-[44px] px-3 py-2 text-xs font-extrabold bg-[#06C755] hover:bg-[#05b24c] text-white rounded-xl inline-flex items-center justify-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5 shrink-0" />
+                        <span>เปิดแชท LINE ส่งข้อความ</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleSendTextStep(false)}
+                        className="min-h-[44px] px-3 py-2 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] text-amber-300 rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5 shrink-0" />
+                        <span>คัดลอกไปวางแชทเดิม</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {sendMode === 'text_first' && (
+                <div className="space-y-3">
+                  {/* Step 1: Send Text / Chat First */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      textSent
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-400'
+                        : 'bg-slate-50 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-slate-950 dark:text-white">
+                        ขั้นตอนที่ 1: ส่งข้อความ / เปิดแชท LINE ก่อน
+                      </span>
+                      {textSent && (
+                        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          ส่งข้อความแล้ว
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <a
+                        href={lineTextOnlyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => handleSendTextStep(true)}
+                        className="min-h-[46px] px-3 py-2 text-xs font-extrabold bg-[#06C755] hover:bg-[#05b24c] text-white rounded-xl inline-flex items-center justify-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5 shrink-0" />
+                        <span>เปิดแชท LINE ส่งข้อความ</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleSendTextStep(false)}
+                        className="min-h-[46px] px-3 py-2 text-xs font-bold bg-slate-950 hover:bg-slate-800 dark:bg-[#162652] text-amber-300 rounded-xl inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5 shrink-0" />
+                        <span>คัดลอกข้อความ</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Send Booking Slip Images After */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      imagesSent
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-400'
+                        : 'bg-slate-50 dark:bg-slate-900/70 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold text-slate-950 dark:text-white">
+                        ขั้นตอนที่ 2: ส่งรูปใบจองตามเข้าแชทเดิม
+                      </span>
+                      {imagesSent && (
+                        <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          ส่งรูปแล้ว
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isSharing || attachments.length === 0}
+                      onClick={handleSendImagesStep}
+                      className="w-full min-h-[46px] px-4 py-2.5 text-xs sm:text-sm font-extrabold btn-gold-copper disabled:opacity-50 rounded-xl inline-flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        {attachments.length > 0
+                          ? `ส่งรูปภาพใบจอง (${attachments.length} รูป) เข้าแชท`
+                          : 'กรุณาแนบรูปภาพใบจองด้านซ้ายก่อน'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                บนมือถือ iPhone / Android ปุ่มสีเขียวจะเปิด Share Sheet ของระบบเพื่อให้เลือกส่งเข้า LINE พร้อมรูปใบจองได้ทันที หากอุปกรณ์บางรุ่นไม่รองรับการแนบข้อความพร้อมไฟล์ ระบบจะแสดงขั้นตอนสำรองให้อัตโนมัติ
+                สามารถส่งรูปพร้อมข้อความในคำสั่งเดียว (เมื่ออุปกรณ์รองรับ) หรือสลับเลือกส่งรูปก่อนแล้วค่อยส่งข้อความ / ส่งข้อความเข้าแชทก่อนแล้วตามด้วยรูปใบจองได้ทันทีครับ
               </p>
             </div>
           </div>
